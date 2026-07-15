@@ -170,6 +170,7 @@ dataset = SpecDataset(
     transform=transform,
     win_len=10,
     p_tics=0.5,
+    include_multigroup=True,
 )
 ```
 
@@ -189,12 +190,16 @@ Audio is loaded as mono and zero-padded when a centered window crosses a file bo
 Each item is:
 
 ```python
-features, tic_type, tic_group, has_tic
+features, tic_type, group_target, has_tic
 ```
 
-Non-tic samples return `tic_type="-1"`, `tic_group="-1"`, and `has_tic=False`. Initialization prints the number of unique tic groups and individual tic types in the selected split; these counts are also available as `dataset.num_groups` and `dataset.num_types`.
+`group_target` is a multi-hot vector using the stable `dataset.group_to_index` mapping built from the full metadata. A single-group tic has one active position, while a combined tic has one active position for every component group. Non-tic samples return `tic_type="-1"`, an all-zero group vector, and `has_tic=False`.
+
+Initialization prints the number of unique tic groups and individual tic types available in the selected split. The full output dimension is available as `dataset.num_groups`, the split-specific count as `dataset.num_groups_available`, and the type count as `dataset.num_types`.
 
 The dataset is stochastic: its index is bounds-checked, but sampling is random and can select metadata rows with replacement.
+
+Set `include_multigroup=False` to prevent tic windows with multiple real groups from being sampled. Script 04 enables this option for the test dataset only; training and validation retain multi-group tic samples.
 
 ## Cross-validation splits
 
@@ -243,7 +248,7 @@ tic_logits, group_logits = model(features)
 They accept `[batch, features, time]`, `[batch, time, features]`, or `[batch, 1, features, time]`. Each uses mean and standard-deviation statistics pooling and returns:
 
 - tic-presence logits shaped `[batch, 2]`; and
-- tic-group logits shaped `[batch, num_groups]`.
+- independent tic-group logits shaped `[batch, num_groups]` for multi-label prediction.
 
 ## Metrics
 
@@ -259,7 +264,7 @@ tic_accuracy, tic_f1, tic_auroc, tic_precision, tic_recall = (
 )
 ```
 
-The functions accept logits or predicted labels. Group targets equal to `-1` are excluded. Tic class `1` is the positive class. AUROC supports tied scores and returns `NaN` when only one real class is present.
+The functions accept logits or predicted labels. Multi-hot all-zero group targets are excluded from group metrics; legacy group targets equal to `-1` are also supported. Tic class `1` is the positive class. AUROC supports tied scores and returns `NaN` when only one real class is present.
 
 ## 4. Model training
 
@@ -273,7 +278,7 @@ GLOBAL_NAME = f"{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}"
 K_FOLDS = 5
 ```
 
-The current defaults use 40-dimensional MFCCs computed from 80 mel bins, 10-second windows, a 50/50 tic/non-tic sampling probability, batch size 16, Adam with learning rate `0.001`, and 10 epochs.
+The current defaults use 40-dimensional MFCCs computed from 80 mel bins, 10-second windows, a 50/50 tic/non-tic sampling probability, batch size 16, Adam with learning rate `0.001`, and 10 epochs. Multi-group tic samples are used for training and validation but excluded from test sampling.
 
 Generate a new split definition and run a fold with:
 
@@ -294,7 +299,7 @@ done
 The training loss is the sum of:
 
 - tic-presence cross-entropy over every sample; and
-- tic-group cross-entropy over tic samples only.
+- tic-group binary cross-entropy over tic samples only, allowing multiple active groups.
 
 At the end of each epoch, the script prints loss, tic accuracy, tic F1, tic AUROC, tic precision, tic recall, group accuracy, and group macro-F1 for training and validation. It then saves a checkpoint containing model state, optimizer state, label mapping, configuration, and fold number:
 

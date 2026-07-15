@@ -91,37 +91,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def group_names(dataset):
-    """Return the tic-group names present in a dataset split."""
-    return {
-        str(group)
-        for group in dataset.tics["Group"].dropna()
-        if str(group) != "-1"
-    }
-
-
-def group_targets(groups, group_to_index, device):
-    """Convert group names to class indices, retaining -1 for non-tics."""
-    targets = [
-        -1 if str(group) == "-1" else group_to_index[str(group)]
-        for group in groups
-    ]
-    return torch.tensor(targets, dtype=torch.long, device=device)
-
-
 def calculate_loss(
     tic_logits,
     group_logits,
     tic_targets,
     groups,
-    group_to_index,
     tic_loss_function,
     group_loss_function,
 ):
     """Combine tic-presence loss with group loss on tic samples only."""
-    group_real = group_targets(groups, group_to_index, tic_logits.device)
+    group_real = groups.float().to(tic_logits.device)
     tic_loss = tic_loss_function(tic_logits, tic_targets)
-    group_mask = (tic_targets == 1) & (group_real >= 0)
+    group_mask = tic_targets == 1
     if group_mask.any():
         group_loss = group_loss_function(
             group_logits[group_mask], group_real[group_mask]
@@ -137,7 +118,6 @@ def train_one_epoch(
     optimizer,
     tic_loss_function,
     group_loss_function,
-    group_to_index,
     device,
 ):
     """Run one optimization epoch."""
@@ -152,7 +132,6 @@ def train_one_epoch(
             group_logits,
             tic_targets,
             groups,
-            group_to_index,
             tic_loss_function,
             group_loss_function,
         )
@@ -165,7 +144,6 @@ def evaluate(
     loader,
     tic_loss_function,
     group_loss_function,
-    group_to_index,
     index_to_group,
     device,
 ):
@@ -189,7 +167,6 @@ def evaluate(
                 group_logits,
                 tic_targets,
                 groups,
-                group_to_index,
                 tic_loss_function,
                 group_loss_function,
             )
@@ -204,22 +181,29 @@ def evaluate(
 
             tic_probabilities = tic_logits.softmax(dim=1)[:, 1].cpu()
             tic_predictions = tic_logits.argmax(dim=1).cpu()
-            group_probabilities = group_logits.softmax(dim=1).cpu()
-            group_predictions = group_probabilities.argmax(dim=1)
+            group_probabilities = group_logits.sigmoid().cpu()
+            group_predictions = group_probabilities >= 0.5
 
             for index in range(batch_size):
-                predicted_group_index = group_predictions[index].item()
+                real_groups = [
+                    index_to_group[group_index]
+                    for group_index in torch.where(group_real[index] > 0.5)[0].tolist()
+                ]
+                predicted_groups = [
+                    index_to_group[group_index]
+                    for group_index in torch.where(group_predictions[index])[0].tolist()
+                ]
                 prediction_rows.append(
                     {
                         "tic_type": tic_types[index],
-                        "tic_group": groups[index],
+                        "tic_group": "+".join(real_groups) if real_groups else "-1",
                         "tic_real": bool(tic_targets[index].item()),
                         "tic_pred": bool(tic_predictions[index].item()),
                         "tic_probability": tic_probabilities[index].item(),
-                        "group_pred": index_to_group[predicted_group_index],
-                        "group_probability": group_probabilities[
-                            index, predicted_group_index
-                        ].item(),
+                        "group_pred": (
+                            "+".join(predicted_groups) if predicted_groups else "-1"
+                        ),
+                        "group_probability": group_probabilities[index].max().item(),
                     }
                 )
 
@@ -230,7 +214,7 @@ def evaluate(
     tic_accuracy, tic_f1, tic_auroc, precision, recall = get_tic_metrics(
         tic_logits, tic_real
     )
-    if (group_real != -1).any():
+    if group_real.any():
         group_accuracy, group_macro_f1 = get_group_metrics(
             group_logits, group_real
         )
@@ -286,36 +270,22 @@ def main():
     fold_model_dir = MODEL_DIR / f"fold{args.fold}"
 
     transform, input_dim = make_transform()
-    train_dataset = SpecDataset(
-        METADATA_PATH, fold["train"], transform, win_len=10, p_tics=0.5
-    )
-    val_dataset = SpecDataset(
-        METADATA_PATH, fold["val"], transform, win_len=10, p_tics=0.5
-    )
-    test_dataset = SpecDataset(
-        METADATA_PATH, fold["test"], transform, win_len=10, p_tics=0.5
-    )
+    print("Train ", end='')
+    train_dataset = SpecDataset(METADATA_PATH, fold["train"], transform, win_len=10, p_tics=0.5)
+    print("Val ", end='')
+    val_dataset = SpecDataset(METADATA_PATH, fold["val"], transform, win_len=10, p_tics=0.5,include_multigroup=False)
+    print("Test ", end='')
+    test_dataset = SpecDataset(METADATA_PATH, fold["test"], transform,win_len=10, p_tics=0.5,include_multigroup=False)
 
-    num_groups = max(
-        train_dataset.num_groups,
-        val_dataset.num_groups,
-        test_dataset.num_groups,
-    )
-    available_groups = sorted(
-        group_names(train_dataset)
-        | group_names(val_dataset)
-        | group_names(test_dataset)
-    )
-    if len(available_groups) > num_groups:
-        raise ValueError(
-            "The union of split groups is larger than the requested model output"
-        )
-    group_to_index = {
-        group: index for index, group in enumerate(available_groups)
-    }
-    index_to_group = {
-        index: group for group, index in group_to_index.items()
-    }
+    if not (
+        train_dataset.group_to_index
+        == val_dataset.group_to_index
+        == test_dataset.group_to_index
+    ):
+        raise ValueError("Dataset splits use different group mappings")
+    num_groups = train_dataset.num_groups
+    group_to_index = train_dataset.group_to_index
+    index_to_group = train_dataset.index_to_group
 
     train_loader = DataLoader(
         train_dataset,
@@ -342,7 +312,7 @@ def main():
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     tic_loss_function = nn.CrossEntropyLoss()
-    group_loss_function = nn.CrossEntropyLoss()
+    group_loss_function = nn.BCEWithLogitsLoss()
     fold_model_dir.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -354,7 +324,6 @@ def main():
             optimizer,
             tic_loss_function,
             group_loss_function,
-            group_to_index,
             device,
         )
         train_metrics, _ = evaluate(
@@ -362,7 +331,6 @@ def main():
             train_loader,
             tic_loss_function,
             group_loss_function,
-            group_to_index,
             index_to_group,
             device,
         )
@@ -371,7 +339,6 @@ def main():
             val_loader,
             tic_loss_function,
             group_loss_function,
-            group_to_index,
             index_to_group,
             device,
         )
@@ -399,7 +366,6 @@ def main():
         test_loader,
         tic_loss_function,
         group_loss_function,
-        group_to_index,
         index_to_group,
         device,
     )

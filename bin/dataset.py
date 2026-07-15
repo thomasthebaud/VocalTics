@@ -29,6 +29,7 @@ class SpecDataset(Dataset):
         transform,
         win_len=10,
         p_tics=0.5,
+        include_multigroup=True,
     ):
         if not isinstance(transform, SUPPORTED_TRANSFORMS):
             raise TypeError(
@@ -59,6 +60,22 @@ class SpecDataset(Dataset):
         if missing:
             raise ValueError(f"Missing metadata columns: {sorted(missing)}")
 
+        all_groups = sorted(
+            {
+                group
+                for value in metadata["Group"].dropna()
+                for group in str(value).split("+")
+                if group != "-1"
+            }
+        )
+        self.group_to_index = {
+            group: index for index, group in enumerate(all_groups)
+        }
+        self.index_to_group = {
+            index: group for group, index in self.group_to_index.items()
+        }
+        self.num_groups = len(all_groups)
+
         selections = {
             (str(participant).upper(), str(phase).upper(), int(session))
             for participant, phase, session in participant_phase_sessions
@@ -71,6 +88,14 @@ class SpecDataset(Dataset):
             axis=1,
         )
         self.metadata = metadata.loc[selected].reset_index(drop=True)
+        if not include_multigroup:
+            multigroup = (
+                (self.metadata["tic/nontic"] == "tic")
+                & self.metadata["Group"]
+                .fillna("-1")
+                .str.contains("+", regex=False)
+            )
+            self.metadata = self.metadata.loc[~multigroup].reset_index(drop=True)
         self.tics = self.metadata.loc[
             self.metadata["tic/nontic"] == "tic"
         ].reset_index(drop=True)
@@ -81,6 +106,7 @@ class SpecDataset(Dataset):
         self.transform = transform
         self.win_len = float(win_len)
         self.p_tics = float(p_tics)
+        self.include_multigroup = bool(include_multigroup)
 
         tic_types = {
             tic_type
@@ -89,12 +115,13 @@ class SpecDataset(Dataset):
             if tic_type != "-1"
         }
         tic_groups = {
-            str(group)
-            for group in self.tics["Group"].dropna()
-            if str(group) != "-1"
+            group
+            for value in self.tics["Group"].dropna()
+            for group in str(value).split("+")
+            if group != "-1"
         }
         self.num_types = len(tic_types)
-        self.num_groups = len(tic_groups)
+        self.num_groups_available = len(tic_groups)
 
         if self.metadata.empty:
             raise ValueError("No metadata rows match the requested recordings")
@@ -105,7 +132,7 @@ class SpecDataset(Dataset):
                 f"No non-tic intervals are at least {self.win_len} seconds long"
             )
         print(
-            f"Split contains {self.num_groups} tic groups "
+            f"Split contains {self.num_groups_available} tic groups "
             f"and {self.num_types} tic types"
         )
 
@@ -126,7 +153,7 @@ class SpecDataset(Dataset):
             center = (float(row["StartTime"]) + float(row["EndTime"])) / 2
             window_start = center - self.win_len / 2
             tic_type = row["Type"]
-            tic_group = row["Group"]
+            group_target = self._group_target(row["Group"])
         else:
             row = self._random_row(self.nontics)
             first_start = float(row["StartTime"])
@@ -135,11 +162,19 @@ class SpecDataset(Dataset):
                 last_start - first_start
             )
             tic_type = "-1"
-            tic_group = "-1"
+            group_target = torch.zeros(self.num_groups, dtype=torch.float32)
 
         waveform = self._load_window(row["AudioPath"], window_start)
         features = self.transform(waveform)
-        return features, tic_type, tic_group, has_tic
+        return features, tic_type, group_target, has_tic
+
+    def _group_target(self, value):
+        """Convert a '+'-separated group label to a multi-hot vector."""
+        target = torch.zeros(self.num_groups, dtype=torch.float32)
+        for group in str(value).split("+"):
+            if group != "-1":
+                target[self.group_to_index[group]] = 1
+        return target
 
     @staticmethod
     def _random_row(rows):

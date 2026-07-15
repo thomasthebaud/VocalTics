@@ -30,17 +30,29 @@ def boolean_values(values):
 
 
 def group_values(group_real, group_pred):
-    """Convert string group labels into shared numeric class indices."""
+    """Convert '+'-separated group labels into shared multi-hot vectors."""
     real = group_real.fillna("-1").astype(str)
     predicted = group_pred.fillna("-1").astype(str)
-    labels = sorted((set(real) | set(predicted)) - {"-1"})
+    labels = sorted(
+        {
+            group
+            for value in list(real) + list(predicted)
+            for group in value.split("+")
+            if group != "-1"
+        }
+    )
     group_to_index = {label: index for index, label in enumerate(labels)}
-    real_tensor = torch.tensor(
-        [-1 if label == "-1" else group_to_index[label] for label in real]
-    )
-    predicted_tensor = torch.tensor(
-        [-1 if label == "-1" else group_to_index[label] for label in predicted]
-    )
+
+    def encode(values):
+        targets = torch.zeros((len(values), len(labels)), dtype=torch.long)
+        for row, value in enumerate(values):
+            for group in value.split("+"):
+                if group != "-1":
+                    targets[row, group_to_index[group]] = 1
+        return targets
+
+    real_tensor = encode(real)
+    predicted_tensor = encode(predicted)
     return predicted_tensor, real_tensor
 
 

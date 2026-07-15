@@ -62,8 +62,34 @@ def _binary_auroc(scores, targets):
 def get_group_metrics(group_pred, group_real):
     """Return accuracy and macro F1 for tic-group predictions.
 
-    Targets equal to ``-1`` are non-tic samples and are excluded.
+    Multi-hot targets use all-zero rows for non-tic samples. Legacy class-index
+    targets equal to ``-1`` are also supported.
     """
+    raw_predictions = torch.as_tensor(group_pred)
+    raw_targets = torch.as_tensor(group_real).to(raw_predictions.device)
+    if raw_targets.ndim > 1:
+        if raw_predictions.shape != raw_targets.shape:
+            raise ValueError("group_pred and group_real must have the same shape")
+        scores = raw_predictions.float()
+        if raw_predictions.dtype.is_floating_point:
+            scores = scores.sigmoid()
+        predictions = scores >= 0.5
+        targets = raw_targets > 0.5
+        tic_mask = targets.any(dim=1)
+        predictions = predictions[tic_mask]
+        targets = targets[tic_mask]
+        if targets.numel() == 0:
+            raise ValueError("No tic-group targets were provided")
+
+        accuracy = (predictions == targets).float().mean().item()
+        active_groups = (predictions | targets).any(dim=0)
+        f1_scores = [
+            _f1(predictions[:, index], targets[:, index], label=1)
+            for index in torch.where(active_groups)[0]
+        ]
+        macro_f1 = sum(f1_scores) / len(f1_scores)
+        return accuracy, macro_f1
+
     predictions = _class_predictions(group_pred)
     targets = torch.as_tensor(group_real).reshape(-1).long().to(predictions.device)
     if len(predictions) != len(targets):
