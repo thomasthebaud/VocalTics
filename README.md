@@ -185,7 +185,7 @@ For every `__getitem__` call, the dataset randomly returns:
 - with probability `p_tics`, a window with a randomly selected tic centered in it; or
 - otherwise, a window sampled entirely inside a non-tic interval that is at least `win_len` seconds long.
 
-Audio is loaded as mono and zero-padded when a centered window crosses a file boundary. Supported transforms are `Spectrogram`, `MelSpectrogram`, and `MFCC`.
+PCM WAV frames are loaded with Python's standard `wave` module, converted to mono, and zero-padded when a centered window crosses a file boundary. Torchaudio is used for the feature transforms rather than audio decoding, so the dataset does not require a torchaudio I/O backend. Supported transforms are `Spectrogram`, `MelSpectrogram`, and `MFCC`.
 
 Each item is:
 

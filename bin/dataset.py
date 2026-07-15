@@ -1,6 +1,9 @@
 """PyTorch datasets for VocalTics experiments."""
 
+from array import array
 from pathlib import Path
+import sys
+import wave
 
 import pandas as pd
 import torch
@@ -13,6 +16,38 @@ SUPPORTED_TRANSFORMS = (
     torchaudio.transforms.MelSpectrogram,
     torchaudio.transforms.MFCC,
 )
+
+
+def _pcm_to_tensor(data, sample_width, channels):
+    """Convert little-endian PCM WAV bytes to [channels, frames]."""
+    if not data:
+        return torch.empty((channels, 0), dtype=torch.float32)
+    if sample_width == 1:
+        values = array("B")
+        values.frombytes(data)
+        waveform = (torch.tensor(values, dtype=torch.float32) - 128) / 128
+    elif sample_width == 2:
+        values = array("h")
+        values.frombytes(data)
+        if sys.byteorder == "big":
+            values.byteswap()
+        waveform = torch.tensor(values, dtype=torch.float32) / 32768
+    elif sample_width == 3:
+        values = [
+            int.from_bytes(data[index : index + 3], "little", signed=True)
+            for index in range(0, len(data), 3)
+        ]
+        waveform = torch.tensor(values, dtype=torch.float32) / 8388608
+    elif sample_width == 4:
+        values = array("i")
+        values.frombytes(data)
+        if sys.byteorder == "big":
+            values.byteswap()
+        waveform = torch.tensor(values, dtype=torch.float32) / 2147483648
+    else:
+        raise ValueError(f"Unsupported PCM sample width: {sample_width} bytes")
+
+    return waveform.reshape(-1, channels).transpose(0, 1)
 
 
 class SpecDataset(Dataset):
@@ -184,21 +219,22 @@ class SpecDataset(Dataset):
 
     def _load_window(self, audio_path, window_start):
         """Load a fixed-length mono window and zero-pad at file boundaries."""
-        info = torchaudio.info(audio_path)
-        sample_rate = info.sample_rate
-        window_frames = round(self.win_len * sample_rate)
-        requested_start = round(window_start * sample_rate)
-        frame_offset = max(0, requested_start)
-        left_padding = max(0, -requested_start)
-        frames_to_load = max(0, window_frames - left_padding)
+        with wave.open(str(audio_path), "rb") as audio_file:
+            if audio_file.getcomptype() != "NONE":
+                raise ValueError(f"Compressed WAV is not supported: {audio_path}")
+            sample_rate = audio_file.getframerate()
+            channels = audio_file.getnchannels()
+            sample_width = audio_file.getsampwidth()
+            total_frames = audio_file.getnframes()
+            window_frames = round(self.win_len * sample_rate)
+            requested_start = round(window_start * sample_rate)
+            frame_offset = max(0, min(requested_start, total_frames))
+            left_padding = max(0, -requested_start)
+            frames_to_load = max(0, window_frames - left_padding)
+            audio_file.setpos(frame_offset)
+            data = audio_file.readframes(frames_to_load)
 
-        waveform, loaded_sample_rate = torchaudio.load(
-            audio_path,
-            frame_offset=frame_offset,
-            num_frames=frames_to_load,
-        )
-        if loaded_sample_rate != sample_rate:
-            raise ValueError(f"Unexpected sample rate while loading {audio_path}")
+        waveform = _pcm_to_tensor(data, sample_width, channels)
 
         waveform = waveform.mean(dim=0, keepdim=True)
         right_padding = window_frames - left_padding - waveform.shape[-1]
