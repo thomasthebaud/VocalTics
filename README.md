@@ -11,8 +11,9 @@ Run the numbered scripts in this order:
 3. `03_extract_features.py` optionally extracts one WavLM-large tensor per full recording.
 4. `04_train_tic_detection.py` trains one cross-validation fold.
 5. Run script 04 once for every fold.
-6. `10_metrics.py` aggregates validation and test metrics across folds.
-7. `11_make_graphs.py` creates confusion matrices from the test predictions.
+6. `05_training_graphs.py` plots training curves across folds.
+7. `10_metrics.py` aggregates validation and test metrics across folds.
+8. `11_make_graphs.py` creates confusion matrices from the test predictions.
 
 ## Expected data layout
 
@@ -52,11 +53,12 @@ The full pipeline uses:
 - torchaudio
 - Hugging Face Transformers
 - Matplotlib
+- Seaborn
 
 A minimal installation command is:
 
 ```bash
-pip install pandas torch torchaudio transformers matplotlib
+pip install pandas torch torchaudio transformers matplotlib seaborn
 ```
 
 Install matching PyTorch and torchaudio builds for the target CPU or CUDA environment. WavLM extraction also requires access to download `microsoft/wavlm-large` from Hugging Face unless it is already cached.
@@ -313,6 +315,12 @@ The epoch with the highest validation tic AUROC is also saved as:
 models/detection/{GLOBAL_NAME}/fold{fold}/best.pt
 ```
 
+Every epoch's complete train and validation metric dictionaries are also saved in a structured CSV-formatted log:
+
+```text
+models/detection/{GLOBAL_NAME}/fold{fold}.log
+```
+
 After training, `best.pt` is reloaded. The validation and test prediction tables are regenerated with that checkpoint, so scripts 10 and 11 evaluate the best validation-AUROC epoch rather than the final epoch:
 
 ```text
@@ -327,6 +335,20 @@ tic_type,tic_group,tic_real,tic_pred,tic_probability,group_pred,group_probabilit
 ```
 
 The cross-validation definition is saved as `splits.json` when `--newsplit` is used. Otherwise, the latest saved JSON is loaded.
+
+## 5. Training curves
+
+After all folds have been trained, configure `GLOBAL_NAME` and `K_FOLDS` in `05_training_graphs.py`, then run:
+
+```bash
+python 05_training_graphs.py
+```
+
+The script loads every structured fold log and uses Seaborn to plot mean train/validation loss and tic AUROC per epoch with a 95% confidence interval across folds. The figure is saved to:
+
+```text
+graphs/training_curve/{GLOBAL_NAME}.png
+```
 
 ## 10. Metrics across folds
 
@@ -365,6 +387,7 @@ graphs/{GLOBAL_NAME}/confusion_matrices.png
 ├── 02_grouping_categories.py
 ├── 03_extract_features.py
 ├── 04_train_tic_detection.py
+├── 05_training_graphs.py
 ├── 10_metrics.py
 ├── 11_make_graphs.py
 ├── Master Tic Record.xlsx

@@ -1,6 +1,7 @@
 """Train and evaluate a TDNN for tic detection and group classification."""
 
 import argparse
+import csv
 import math
 from pathlib import Path
 
@@ -49,6 +50,19 @@ SPLIT_FUNCTIONS = {
     "session": splits_by_session,
     "file": splits_by_file,
 }
+LOG_FIELDS = [
+    "fold",
+    "epoch",
+    "split",
+    "loss",
+    "tic_accuracy",
+    "tic_f1",
+    "tic_auroc",
+    "tic_precision",
+    "tic_recall",
+    "group_accuracy",
+    "group_macro_f1",
+]
 
 
 def make_transform():
@@ -242,6 +256,21 @@ def print_metrics(split_name, metrics):
     print(f"{split_name}: {values}")
 
 
+def initialize_log(log_path):
+    """Create a new structured metrics log for one fold."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", newline="", encoding="utf-8") as file:
+        csv.DictWriter(file, fieldnames=LOG_FIELDS).writeheader()
+
+
+def append_log(log_path, fold, epoch, split_name, metrics):
+    """Append one epoch and split to the structured fold log."""
+    row = {"fold": fold, "epoch": epoch, "split": split_name, **metrics}
+    with log_path.open("a", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=LOG_FIELDS)
+        writer.writerow(row)
+
+
 def main():
     args = parse_args()
     torch.manual_seed(42)
@@ -269,6 +298,8 @@ def main():
         )
     fold = splits[args.fold]
     fold_model_dir = MODEL_DIR / f"fold{args.fold}"
+    log_path = MODEL_DIR / f"fold{args.fold}.log"
+    initialize_log(log_path)
 
     transform, input_dim = make_transform()
     print("Train ", end='')
@@ -348,6 +379,8 @@ def main():
         print(f"\nEpoch {epoch}/{EPOCHS}")
         print_metrics("train", train_metrics)
         print_metrics("val", val_metrics)
+        append_log(log_path, args.fold, epoch, "train", train_metrics)
+        append_log(log_path, args.fold, epoch, "val", val_metrics)
 
         checkpoint = {
             "epoch": epoch,
