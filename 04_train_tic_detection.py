@@ -404,7 +404,7 @@ def main():
             best_epoch = epoch
             if math.isfinite(val_auroc):
                 best_auroc = val_auroc
-            print(f"Saved new best checkpoint to {best_path}")
+            print(f"Saved new best checkpoint to {best_path} (best val AUROC: {best_auroc:.4f})")
 
     best_checkpoint = torch.load(best_path, map_location=device)
     model.load_state_dict(best_checkpoint["model_state_dict"])

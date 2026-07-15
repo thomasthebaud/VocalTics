@@ -358,7 +358,7 @@ Configure `GLOBAL_NAME` and `K_FOLDS` in `10_metrics.py`, then run:
 python 10_metrics.py
 ```
 
-The script loads every validation and test prediction table, calculates metrics separately for each fold, and prints their fold-level mean and sample standard deviation in one table.
+The script loads every validation and test prediction table, calculates metrics separately for each fold, and prints their fold-level mean and sample standard deviation. In addition to global metrics, it uses `splits.json` and the source metadata to report separate tables for tic types present in that fold's training split and tic types absent from it. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined.
 
 ## 11. Confusion matrices
 
