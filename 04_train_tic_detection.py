@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from bin.dataset import SpecDataset
 from bin.make_splits import (
+    load_split,
     save_split,
     splits_by_file,
     splits_by_participant,
@@ -81,6 +82,11 @@ def parse_args():
         type=int,
         default=1,
         help="Fold number to run (default: 1)",
+    )
+    parser.add_argument(
+        "--newsplit",
+        action="store_true",
+        help="Generate and save new splits instead of loading splits.json",
     )
     return parser.parse_args()
 
@@ -261,8 +267,17 @@ def main():
         raise ValueError(f"Unknown SPLIT_BY: {SPLIT_BY}")
     if MODEL_NAME not in MODEL_CLASSES:
         raise ValueError(f"Unknown MODEL_NAME: {MODEL_NAME}")
-    splits = SPLIT_FUNCTIONS[SPLIT_BY](metadata, K=K_FOLDS)
-    save_split(splits, SPLIT_PATH)
+    if args.newsplit:
+        splits = SPLIT_FUNCTIONS[SPLIT_BY](metadata, K=K_FOLDS)
+        save_split(splits, SPLIT_PATH)
+        print(f"Generated and saved new splits to {SPLIT_PATH}")
+    else:
+        if not SPLIT_PATH.exists():
+            raise FileNotFoundError(
+                f"No saved split found at {SPLIT_PATH}; run with --newsplit"
+            )
+        splits = load_split(SPLIT_PATH)
+        print(f"Loaded splits from {SPLIT_PATH}")
     if args.fold not in splits:
         raise ValueError(
             f"Fold {args.fold} is unavailable; choose from {sorted(splits)}"

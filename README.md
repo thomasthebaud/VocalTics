@@ -109,6 +109,23 @@ The script adds a `Group` column to the existing metadata and overwrites `metada
 
 The current mapping contains 75 tic types across 15 individual groups. Barking, Coprolalia, DisinhibitedSpeech, and Humming were removed because each contributed less than one minute in the available data. One summary table expands combined labels so each segment contributes to every individual group it contains. A second table reports the `+` combination categories themselves.
 
+### Tics by individual group
+
+| Group | Tics | Minutes | Participants |
+|---|---:|---:|---:|
+| Atypical Breathing | 146 | 200.71 | 5 |
+| Blocking | 123 | 42.89 | 2 |
+| Coughing | 156 | 151.14 | 3 |
+| Grunting | 97 | 212.85 | 2 |
+| Mouth Movements | 163 | 120.17 | 4 |
+| Mouth Noises | 471 | 369.60 | 7 |
+| Nose Movements | 158 | 151.86 | 2 |
+| Other Animal Noises | 70 | 163.72 | 2 |
+| Sniffing | 169 | 222.63 | 4 |
+| Snorting | 16 | 53.61 | 2 |
+| Syllables | 25 | 25.81 | 2 |
+| Throat Clearing | 124 | 183.58 | 4 |
+
 ## 3. WavLM feature extraction
 
 Run:
@@ -258,11 +275,13 @@ K_FOLDS = 5
 
 The current defaults use 40-dimensional MFCCs computed from 80 mel bins, 10-second windows, a 50/50 tic/non-tic sampling probability, batch size 16, Adam with learning rate `0.001`, and 10 epochs.
 
-Run a fold with:
+Generate a new split definition and run a fold with:
 
 ```bash
-python 04_train_tic_detection.py --fold 1
+python 04_train_tic_detection.py --fold 1 --newsplit
 ```
+
+Without `--newsplit`, the script reloads the existing `splits.json`. Use the flag only when a new cross-validation assignment should be generated and saved.
 
 Repeat for all folds:
 
@@ -296,7 +315,7 @@ Prediction tables contain:
 tic_type,tic_group,tic_real,tic_pred,tic_probability,group_pred,group_probability
 ```
 
-The generated cross-validation definition is saved as `splits.json`.
+The cross-validation definition is saved as `splits.json` when `--newsplit` is used. Otherwise, the latest saved JSON is loaded.
 
 ## 10. Metrics across folds
 
