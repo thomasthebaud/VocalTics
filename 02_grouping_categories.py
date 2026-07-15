@@ -18,7 +18,6 @@ TIC_GROUPS = {
     "1038": "Syllables",
     "1039": "Words",
     "1040": "Phrases",
-    "1041": "DisinhibitedSpeech",
     "1042": "Echolalia",
     "1043": "Coughing",
     "1044": "Blocking",
@@ -33,7 +32,6 @@ TIC_GROUPS = {
     "1081": "Mouth Movements",
     "1082": "Atypical Breathing",
     "1083": "Syllables",
-    "1084": "Humming",
     "1101": "Syllables",
     "1106": "Mouth Noises",
     "1116": "Coughing",
@@ -44,7 +42,6 @@ TIC_GROUPS = {
     "1141": "Sniffing",
     "1142": "Grunting",
     "1143": "Atypical Breathing",
-    "1144": "Barking",
     "1145": "Mouth Noises",
     "1146": "Blocking",
     "1186": "Snorting",
@@ -80,8 +77,6 @@ TIC_GROUPS = {
     "1399": "Mouth Movements",
     "1401": "Mouth Movements",
     "1403": "Mouth Movements",
-    "1404": "Coprolalia",
-    "1405": "Coprolalia",
     "1406": "Mouth Movements",
     "1407": "Mouth Movements",
     "1416": "Mouth Movements",
@@ -89,7 +84,6 @@ TIC_GROUPS = {
     "1418": "Atypical Breathing",
     "1419": "Words",
     "1420": "Words",
-    "1423": "DisinhibitedSpeech",
 }
 
 
@@ -107,16 +101,28 @@ def group_tic_types(value):
         group = TIC_GROUPS[tic_type]
         if group not in groups:
             groups.append(group)
-    if len(groups) == 1:
-        return groups[0]
-    return "MultipleGroups"
+    return "+".join(sorted(groups))
 
 
 def print_group_summary(metadata):
-    """Print tic counts, durations, and participant counts by group."""
+    """Print summaries for individual groups and group combinations."""
     tics = metadata.loc[metadata["Group"] != "-1"]
-    summary = (
-        tics.groupby("Group")
+
+    individual_groups = tics.assign(
+        Group=tics["Group"].str.split("+", regex=False)
+    ).explode("Group")
+    individual_summary = (
+        individual_groups.groupby("Group")
+        .agg(
+            Tics=("Group", "size"),
+            Minutes=("Duration", lambda duration: duration.sum() / 60),
+            Participants=("ID", "nunique"),
+        )
+        .sort_index()
+    )
+    combinations = tics.loc[tics["Group"].str.contains("+", regex=False)]
+    combination_summary = (
+        combinations.groupby("Group")
         .agg(
             Tics=("Group", "size"),
             Minutes=("Duration", lambda duration: duration.sum() / 60),
@@ -125,11 +131,25 @@ def print_group_summary(metadata):
         .sort_index()
     )
 
-    print("\nTics by group")
-    if summary.empty:
+    print("\nTics by individual group")
+    if individual_summary.empty:
         print("No tics found.")
     else:
-        print(summary.to_string(formatters={"Minutes": "{:.2f}".format}))
+        print(
+            individual_summary.to_string(
+                formatters={"Minutes": "{:.2f}".format}
+            )
+        )
+
+    print("\nTics by group combination")
+    if combination_summary.empty:
+        print("No group combinations found.")
+    else:
+        print(
+            combination_summary.to_string(
+                formatters={"Minutes": "{:.2f}".format}
+            )
+        )
 
 
 def main():

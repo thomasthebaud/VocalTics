@@ -73,7 +73,7 @@ The script:
 
 - reads `ticList.csv` with tic IDs preserved as strings;
 - discovers valid WAV files and measures their duration with the standard-library `wave` module;
-- retains only the 81 vocal tic IDs hard-coded in `KEEP_TYPES`;
+- retains only the 75 vocal tic IDs hard-coded in `KEEP_TYPES`;
 - clips annotations to valid recording boundaries;
 - merges overlapping or touching annotations;
 - joins multiple retained tic IDs with `+`;
@@ -105,9 +105,9 @@ The script adds a `Group` column to the existing metadata and overwrites `metada
 
 - non-tic rows use `Type=-1` and `Group=-1`;
 - merged tic types from the same group use that group once; and
-- merged tic types from different groups use `Group=MultipleGroups`.
+- merged tic types from different groups use a sorted `GroupA+GroupB` label.
 
-The current mapping contains 81 tic types across 19 groups. A summary table reports tic count, total minutes, and participant count for every group.
+The current mapping contains 75 tic types across 15 individual groups. Barking, Coprolalia, DisinhibitedSpeech, and Humming were removed because each contributed less than one minute in the available data. One summary table expands combined labels so each segment contributes to every individual group it contains. A second table reports the `+` combination categories themselves.
 
 ## 3. WavLM feature extraction
 
