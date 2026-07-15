@@ -1,6 +1,7 @@
 """Train and evaluate a TDNN for tic detection and group classification."""
 
 import argparse
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -316,7 +317,9 @@ def main():
     fold_model_dir.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    val_predictions = None
+    best_auroc = float("-inf")
+    best_epoch = None
+    best_path = fold_model_dir / "best.pt"
     for epoch in range(1, EPOCHS + 1):
         train_one_epoch(
             model,
@@ -346,20 +349,42 @@ def main():
         print_metrics("train", train_metrics)
         print_metrics("val", val_metrics)
 
-        torch.save(
-            {
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "group_to_index": group_to_index,
-                "num_groups": num_groups,
-                "model_name": MODEL_NAME,
-                "feature_name": FEAT_NAME,
-                "split_by": SPLIT_BY,
-                "fold": args.fold,
-            },
-            fold_model_dir / f"{epoch}.pt",
-        )
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "group_to_index": group_to_index,
+            "num_groups": num_groups,
+            "model_name": MODEL_NAME,
+            "feature_name": FEAT_NAME,
+            "split_by": SPLIT_BY,
+            "fold": args.fold,
+            "val_tic_auroc": val_metrics["tic_auroc"],
+        }
+        torch.save(checkpoint, fold_model_dir / f"{epoch}.pt")
+
+        val_auroc = val_metrics["tic_auroc"]
+        if best_epoch is None or (
+            math.isfinite(val_auroc) and val_auroc > best_auroc
+        ):
+            torch.save(checkpoint, best_path)
+            best_epoch = epoch
+            if math.isfinite(val_auroc):
+                best_auroc = val_auroc
+            print(f"Saved new best checkpoint to {best_path}")
+
+    best_checkpoint = torch.load(best_path, map_location=device)
+    model.load_state_dict(best_checkpoint["model_state_dict"])
+    val_metrics, val_predictions = evaluate(
+        model,
+        val_loader,
+        tic_loss_function,
+        group_loss_function,
+        index_to_group,
+        device,
+    )
+    print(f"\nBest epoch: {best_checkpoint['epoch']}")
+    print_metrics("best val", val_metrics)
 
     test_metrics, test_predictions = evaluate(
         model,

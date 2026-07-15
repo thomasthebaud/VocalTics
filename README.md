@@ -301,13 +301,19 @@ The training loss is the sum of:
 - tic-presence cross-entropy over every sample; and
 - tic-group binary cross-entropy over tic samples only, allowing multiple active groups.
 
-At the end of each epoch, the script prints loss, tic accuracy, tic F1, tic AUROC, tic precision, tic recall, group accuracy, and group macro-F1 for training and validation. It then saves a checkpoint containing model state, optimizer state, label mapping, configuration, and fold number:
+At the end of each epoch, the script prints loss, tic accuracy, tic F1, tic AUROC, tic precision, tic recall, group accuracy, and group macro-F1 for training and validation. It then saves a checkpoint containing model state, optimizer state, label mapping, configuration, fold number, and validation tic AUROC:
 
 ```text
 models/detection/{GLOBAL_NAME}/fold{fold}/{epoch}.pt
 ```
 
-After the final epoch, it evaluates the test dataset and saves validation and test prediction tables:
+The epoch with the highest validation tic AUROC is also saved as:
+
+```text
+models/detection/{GLOBAL_NAME}/fold{fold}/best.pt
+```
+
+After training, `best.pt` is reloaded. The validation and test prediction tables are regenerated with that checkpoint, so scripts 10 and 11 evaluate the best validation-AUROC epoch rather than the final epoch:
 
 ```text
 outputs/detection/{GLOBAL_NAME}/fold{fold}_val.csv
