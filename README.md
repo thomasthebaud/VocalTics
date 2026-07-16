@@ -368,10 +368,10 @@ Configure `GLOBAL_NAME`, `K_FOLDS`, and `SPLIT_NAME` in `11_make_graphs.py`, the
 python 11_make_graphs.py
 ```
 
-The script combines the configured prediction split across folds and draws two count-based confusion matrices:
+The script combines the configured prediction split across folds and draws two confusion matrices:
 
-- tic versus no tic; and
-- tic group for samples containing a real tic.
+- tic versus no tic, annotated with sample counts and percentages normalized within each real-label row; and
+- tic group after excluding rows whose real or predicted group is `-1`. Zero cells remain white, while every positive count is colored using a logarithmic scale.
 
 The figure is saved to:
 

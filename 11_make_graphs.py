@@ -3,6 +3,8 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap, LogNorm
+import numpy as np
 import pandas as pd
 
 
@@ -54,9 +56,11 @@ def tic_confusion_matrix(predictions):
 
 
 def group_confusion_matrix(predictions):
-    """Return the confusion matrix for samples containing a real tic."""
+    """Return the group confusion matrix without real or predicted -1 labels."""
+    real_groups = predictions["tic_group"].fillna("-1").astype(str)
+    predicted_groups = predictions["group_pred"].fillna("-1").astype(str)
     tic_rows = predictions.loc[
-        predictions["tic_group"].fillna("-1") != "-1"
+        (real_groups != "-1") & (predicted_groups != "-1")
     ].copy()
     if tic_rows.empty:
         raise ValueError("No tic-group predictions were found")
@@ -69,9 +73,24 @@ def group_confusion_matrix(predictions):
     )
 
 
-def draw_confusion_matrix(axis, matrix, title):
-    """Draw and annotate one count-based confusion matrix."""
-    image = axis.imshow(matrix.to_numpy(), cmap="Blues")
+def draw_confusion_matrix(
+    axis, matrix, title, show_percentages=False, color_positive=False
+):
+    """Draw and annotate one confusion matrix."""
+    values = matrix.to_numpy()
+    if color_positive:
+        colors = plt.cm.Blues(np.linspace(0.25, 1, 256))
+        colormap = ListedColormap(colors)
+        displayed_values = np.ma.masked_equal(values, 0)
+        image = axis.imshow(
+            displayed_values,
+            cmap=colormap,
+            norm=LogNorm(vmin=1, vmax=max(1, values.max())),
+        )
+        threshold = values.max() ** 0.5
+    else:
+        image = axis.imshow(values, cmap="Blues")
+        threshold = values.max() / 2
     axis.set_title(title)
     axis.set_xlabel("Predicted")
     axis.set_ylabel("Real")
@@ -83,7 +102,12 @@ def draw_confusion_matrix(axis, matrix, title):
         for column in range(len(matrix.columns)):
             value = matrix.iloc[row, column]
             color = "white" if value > threshold else "black"
-            axis.text(column, row, str(value), ha="center", va="center", color=color)
+            label = str(value)
+            if show_percentages:
+                row_total = matrix.iloc[row].sum()
+                percentage = 100 * value / row_total if row_total else 0
+                label = f"{value}\n({percentage:.1f}%)"
+            axis.text(column, row, label, ha="center", va="center", color=color)
     return image
 
 
@@ -94,10 +118,16 @@ def main():
 
     figure, axes = plt.subplots(1, 2, figsize=(22, 9))
     tic_image = draw_confusion_matrix(
-        axes[0], tic_matrix, "Tic detection confusion matrix"
+        axes[0],
+        tic_matrix,
+        "Tic detection confusion matrix",
+        show_percentages=True,
     )
     group_image = draw_confusion_matrix(
-        axes[1], group_matrix, "Tic group confusion matrix"
+        axes[1],
+        group_matrix,
+        "Tic group confusion matrix",
+        color_positive=True,
     )
     figure.colorbar(tic_image, ax=axes[0], fraction=0.046, pad=0.04)
     figure.colorbar(group_image, ax=axes[1], fraction=0.046, pad=0.04)
