@@ -4,6 +4,7 @@ import argparse
 import csv
 import math
 from pathlib import Path
+import time
 
 import pandas as pd
 import torch
@@ -257,6 +258,16 @@ def print_metrics(split_name, metrics):
     print(f"{split_name}: {values}")
 
 
+def format_duration(seconds):
+    """Format a duration compactly as MM:SS or HH:MM:SS."""
+    seconds = max(0, round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+    return f"{minutes:02}:{seconds:02}"
+
+
 def initialize_log(log_path):
     """Create a new structured metrics log for one fold."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,7 +355,9 @@ def main():
     best_auroc = float("-inf")
     best_epoch = None
     best_path = fold_model_dir / "best.pt"
+    training_start = time.perf_counter()
     for epoch in range(1, EPOCHS + 1):
+        epoch_start = time.perf_counter()
         train_one_epoch(
             model,
             train_loader,
@@ -369,7 +382,15 @@ def main():
             index_to_group,
             device,
         )
-        print(f"\nEpoch {epoch}/{EPOCHS}")
+        elapsed = time.perf_counter() - training_start
+        epoch_duration = time.perf_counter() - epoch_start
+        remaining = elapsed / epoch * (EPOCHS - epoch)
+        print(
+            f"\nEpoch {epoch}/{EPOCHS} | "
+            f"elapsed {format_duration(elapsed)} | "
+            f"epoch {format_duration(epoch_duration)} | "
+            f"ETA {format_duration(remaining)}"
+        )
         print_metrics("train", train_metrics)
         print_metrics("val", val_metrics)
         append_log(log_path, args.fold, epoch, "train", train_metrics)
@@ -429,6 +450,8 @@ def main():
         output_dir / f"fold{args.fold}_test.csv", index=False
     )
     print(f"Saved predictions to {output_dir}")
+    total_time = time.perf_counter() - training_start
+    print(f"Fold {args.fold} total time: {format_duration(total_time)}")
 
 
 if __name__ == "__main__":
