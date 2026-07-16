@@ -13,7 +13,7 @@ DATA_ROOT = Path("/projects/vocaltics/data/")
 METADATA_PATH = DATA_ROOT / "metadata.csv"
 OUTPUT_ROOT = Path("/project/vocaltics/data/wavlm_embeddings/")
 OUTPUT_METADATA_PATH = OUTPUT_ROOT / "metadata.csv"
-MODEL_NAME = "microsoft/wavlm-large"
+MODEL_NAME = "microsoft/wavlm-base-plus"
 WINDOW_SECONDS = 30
 
 

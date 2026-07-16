@@ -139,7 +139,7 @@ Run:
 python 03_extract_features.py
 ```
 
-The script loads `microsoft/wavlm-large`, converts each recording to mono, resamples it to the model sampling rate, and processes it in 30-second windows. The contextual `last_hidden_state` tensors are concatenated over time.
+The script loads `microsoft/wavlm-base-plus`, converts each recording to mono, resamples it to the model sampling rate, and processes it in 30-second windows. The contextual `last_hidden_state` tensors are concatenated over time.
 
 One tensor is saved per full audio file:
 
