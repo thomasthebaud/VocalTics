@@ -30,7 +30,7 @@ MODEL_NAME = "BiLSTM"
 SPLIT_BY = "session"
 FEAT_NAME = "MFCC"
 EPOCHS = 10
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 LEARNING_RATE = 0.0001
 NUM_WORKERS = 0
 WIN_LEN = 10
@@ -179,7 +179,7 @@ def main():
     fold_model_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    best_auroc = float("-inf")
+    best_loss = float("inf")
     best_epoch = None
     best_path = fold_model_dir / "best.pt"
     training_start = start_timer()
@@ -204,21 +204,22 @@ def main():
             "feature_name": args.feat_name,
             "split_by": args.split_by,
             "fold": args.fold,
+            "val_loss": val_metrics["loss"],
             "val_frame_auroc": val_metrics["frame_auroc"],
         }
         torch.save(checkpoint, fold_model_dir / f"{epoch}.pt")
 
-        val_auroc = val_metrics["frame_auroc"]
+        val_loss = val_metrics["loss"]
         if best_epoch is None or (
-            math.isfinite(val_auroc) and val_auroc > best_auroc
+            math.isfinite(val_loss) and val_loss < best_loss
         ):
             torch.save(checkpoint, best_path)
             best_epoch = epoch
-            if math.isfinite(val_auroc):
-                best_auroc = val_auroc
+            if math.isfinite(val_loss):
+                best_loss = val_loss
             print(
                 f"Saved new best checkpoint to {best_path} "
-                f"(validation frame AUROC: {val_auroc:.4f})"
+                f"(validation loss: {val_loss:.4f})"
             )
 
     best_checkpoint = torch.load(best_path, map_location=device)

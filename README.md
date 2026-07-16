@@ -417,7 +417,7 @@ sh launch_all_segmentation_trainings.sh
 The available models are `BiLSTM`, `CNN`, and `CNN_BiLSTM`. Training uses the
 segmentation `SpecDataset` with `p_tics=0.2` and `BCEWithLogitsLoss`. Each epoch
 logs frame accuracy, frame F1, frame AUROC, segment accuracy, and segment F1.
-The checkpoint with the highest validation frame AUROC is saved as `best.pt`.
+The checkpoint with the lowest validation loss is saved as `best.pt`.
 Models, logs, and validation/test prediction tables are written under:
 
 ```text
