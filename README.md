@@ -358,20 +358,20 @@ Configure `GLOBAL_NAME` and `K_FOLDS` in `10_metrics.py`, then run:
 python 10_metrics.py
 ```
 
-The script loads every validation and test prediction table, calculates metrics separately for each fold, and prints their fold-level mean and sample standard deviation. In addition to global metrics, it uses `splits.json` and the source metadata to report separate tables for tic types present in that fold's training split and tic types absent from it. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined.
+The script loads every validation and test prediction table, calculates metrics separately for each fold, and prints their fold-level mean and sample standard deviation. In addition to global metrics, it uses `splits.json` and the source metadata to report separate tables for tic types present in that fold's training split and tic types absent from it. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined. Rows whose real or predicted group contains `+` are excluded from group metrics but remain part of tic-detection metrics.
 
 ## 11. Confusion matrices
 
-Configure `GLOBAL_NAME`, `K_FOLDS`, and `SPLIT_NAME` in `11_make_graphs.py`, then run:
+Configure `GLOBAL_NAME` and `K_FOLDS` in `11_make_graphs.py`, then run:
 
 ```bash
 python 11_make_graphs.py
 ```
 
-The script combines the configured prediction split across folds and draws two confusion matrices:
+The script combines test and validation predictions across folds and draws four confusion matrices:
 
-- tic versus no tic, annotated with sample counts and percentages normalized within each real-label row; and
-- tic group after excluding rows whose real or predicted group is `-1`. Zero cells remain white, while every positive count is colored using a logarithmic scale.
+- test and validation tic-versus-no-tic matrices, annotated with sample counts and percentages normalized within each real-label row; and
+- test and validation tic-group matrices after excluding rows whose real or predicted group is `-1` or contains `+`. Zero cells remain white, while every positive count is colored using a logarithmic scale.
 
 The figure is saved to:
 

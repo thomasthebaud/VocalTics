@@ -10,7 +10,6 @@ import pandas as pd
 
 GLOBAL_NAME = "TDNN_MFCC_bysession"
 K_FOLDS = 5
-SPLIT_NAME = "test"
 OUTPUT_DIR = Path("outputs/detection") / GLOBAL_NAME
 GRAPH_PATH = Path("graphs") / GLOBAL_NAME / "confusion_matrices.png"
 
@@ -21,11 +20,11 @@ def boolean_values(values):
     return normalized.isin(["true", "1"])
 
 
-def load_predictions():
-    """Load and concatenate prediction tables from every fold."""
+def load_predictions(split_name):
+    """Load and concatenate one prediction split from every fold."""
     predictions = []
     for fold in range(1, K_FOLDS + 1):
-        csv_path = OUTPUT_DIR / f"fold{fold}_{SPLIT_NAME}.csv"
+        csv_path = OUTPUT_DIR / f"fold{fold}_{split_name}.csv"
         if not csv_path.exists():
             raise FileNotFoundError(f"Missing prediction file: {csv_path}")
         predictions.append(
@@ -56,11 +55,14 @@ def tic_confusion_matrix(predictions):
 
 
 def group_confusion_matrix(predictions):
-    """Return the group confusion matrix without real or predicted -1 labels."""
+    """Return the matrix without -1 labels or '+' group combinations."""
     real_groups = predictions["tic_group"].fillna("-1").astype(str)
     predicted_groups = predictions["group_pred"].fillna("-1").astype(str)
     tic_rows = predictions.loc[
-        (real_groups != "-1") & (predicted_groups != "-1")
+        (real_groups != "-1")
+        & (predicted_groups != "-1")
+        & ~real_groups.str.contains("+", regex=False)
+        & ~predicted_groups.str.contains("+", regex=False)
     ].copy()
     if tic_rows.empty:
         raise ValueError("No tic-group predictions were found")
@@ -97,7 +99,6 @@ def draw_confusion_matrix(
     axis.set_xticks(range(len(matrix.columns)), matrix.columns, rotation=45, ha="right")
     axis.set_yticks(range(len(matrix.index)), matrix.index)
 
-    threshold = matrix.to_numpy().max() / 2
     for row in range(len(matrix.index)):
         for column in range(len(matrix.columns)):
             value = matrix.iloc[row, column]
@@ -112,26 +113,42 @@ def draw_confusion_matrix(
 
 
 def main():
-    predictions = load_predictions()
-    tic_matrix = tic_confusion_matrix(predictions)
-    group_matrix = group_confusion_matrix(predictions)
+    test_predictions = load_predictions("test")
+    validation_predictions = load_predictions("val")
+    matrices = [
+        (
+            "Test",
+            tic_confusion_matrix(test_predictions),
+            group_confusion_matrix(test_predictions),
+        ),
+        (
+            "Validation",
+            tic_confusion_matrix(validation_predictions),
+            group_confusion_matrix(validation_predictions),
+        ),
+    ]
 
-    figure, axes = plt.subplots(1, 2, figsize=(22, 9))
-    tic_image = draw_confusion_matrix(
-        axes[0],
-        tic_matrix,
-        "Tic detection confusion matrix",
-        show_percentages=True,
-    )
-    group_image = draw_confusion_matrix(
-        axes[1],
-        group_matrix,
-        "Tic group confusion matrix",
-        color_positive=True,
-    )
-    figure.colorbar(tic_image, ax=axes[0], fraction=0.046, pad=0.04)
-    figure.colorbar(group_image, ax=axes[1], fraction=0.046, pad=0.04)
-    figure.suptitle(f"{GLOBAL_NAME} — {SPLIT_NAME} predictions", fontsize=16)
+    figure, axes = plt.subplots(2, 2, figsize=(22, 18))
+    for row, (split_name, tic_matrix, group_matrix) in enumerate(matrices):
+        tic_image = draw_confusion_matrix(
+            axes[row, 0],
+            tic_matrix,
+            f"{split_name} tic detection confusion matrix",
+            show_percentages=True,
+        )
+        group_image = draw_confusion_matrix(
+            axes[row, 1],
+            group_matrix,
+            f"{split_name} tic group confusion matrix",
+            color_positive=True,
+        )
+        figure.colorbar(
+            tic_image, ax=axes[row, 0], fraction=0.046, pad=0.04
+        )
+        figure.colorbar(
+            group_image, ax=axes[row, 1], fraction=0.046, pad=0.04
+        )
+    figure.suptitle(f"{GLOBAL_NAME} confusion matrices", fontsize=16)
     figure.tight_layout()
 
     GRAPH_PATH.parent.mkdir(parents=True, exist_ok=True)

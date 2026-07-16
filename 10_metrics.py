@@ -85,8 +85,13 @@ def load_fold_metrics(predictions):
         predictions["tic_probability"].to_numpy(), dtype=torch.float32
     )
     tic_metrics = get_tic_metrics(tic_scores, tic_real)
+    real_groups = predictions["tic_group"].fillna("-1").astype(str)
+    predicted_groups = predictions["group_pred"].fillna("-1").astype(str)
+    single_group = ~real_groups.str.contains(
+        "+", regex=False
+    ) & ~predicted_groups.str.contains("+", regex=False)
     group_pred, group_real = group_values(
-        predictions["tic_group"], predictions["group_pred"]
+        real_groups[single_group], predicted_groups[single_group]
     )
     if group_real.any():
         group_metrics = get_group_metrics(group_pred, group_real)
