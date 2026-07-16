@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 import torchaudio
+from tqdm import tqdm
 from transformers import AutoFeatureExtractor, WavLMModel
 
 
@@ -62,8 +63,20 @@ def main():
     # Store the output path associated with each unique source recording.
     embedding_paths = {}
 
+    # Group metadata so each full audio file is processed only once.
+    recordings = metadata.groupby("AudioPath", sort=False)
+    # Display dataset-level progress, processing rate, elapsed time, and ETA.
+    progress = tqdm(
+        recordings,
+        total=recordings.ngroups,
+        desc="Extracting recordings",
+        unit="recording",
+        dynamic_ncols=True,
+    )
     # Process each full audio file only once, even though metadata has many segments.
-    for audio_path, rows in metadata.groupby("AudioPath", sort=False):
+    for audio_path, rows in progress:
+        # Show which recording is currently being processed.
+        progress.set_postfix(file=Path(audio_path).name, refresh=True)
         # Read the participant ID associated with this recording.
         participant = str(rows["ID"].iloc[0])
         # Create one output folder per participant.
@@ -82,8 +95,12 @@ def main():
         torch.save(embeddings, embedding_path)
         # Remember the path so every segment from this recording can reference it.
         embedding_paths[audio_path] = str(embedding_path)
-        # Print progress after completing the recording.
-        print(f"Saved {embedding_path} with shape {tuple(embeddings.shape)}")
+        # Add the most recently saved tensor shape to the progress display.
+        progress.set_postfix(
+            file=Path(audio_path).name,
+            shape=str(tuple(embeddings.shape)),
+            refresh=True,
+        )
 
     # Add the recording-level embedding path to every corresponding segment row.
     metadata["embedding_path"] = metadata["AudioPath"].map(embedding_paths)

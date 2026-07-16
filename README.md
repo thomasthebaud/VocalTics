@@ -54,13 +54,14 @@ The full pipeline uses:
 - PyTorch
 - torchaudio
 - Hugging Face Transformers
+- tqdm
 - Matplotlib
 - Seaborn
 
 A minimal installation command is:
 
 ```bash
-pip install pandas torch torchaudio transformers matplotlib seaborn
+pip install pandas torch torchaudio transformers tqdm matplotlib seaborn
 ```
 
 Install matching PyTorch and torchaudio builds for the target CPU or CUDA environment. WavLM extraction also requires access to download `microsoft/wavlm-large` from Hugging Face unless it is already cached.
