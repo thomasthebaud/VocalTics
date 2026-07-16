@@ -429,6 +429,11 @@ Prediction CSV files contain one row per feature frame, including its segment
 ID, frame truth/prediction/probability, and the reduced segment truth and
 prediction.
 
+Both training scripts use `bin/training_functions.py` for their common command
+line arguments, feature transforms, saved-fold loading, DataLoader creation,
+metric logging, and elapsed/estimated time reporting. Detection- and
+segmentation-specific losses and evaluation remain in their respective scripts.
+
 ## 7. Training curves
 
 After all folds have been trained, configure `GLOBAL_NAME` and `K_FOLDS` in `07_training_graphs.py`, then run:
@@ -500,7 +505,8 @@ graphs/{GLOBAL_NAME}/confusion_matrices.png
     ├── detection_models.py
     ├── segmentation_datasets.py
     ├── segmentation_metrics.py
-    └── segmentation_models.py
+    ├── segmentation_models.py
+    └── training_functions.py
 ```
 
 ## Generated artifacts

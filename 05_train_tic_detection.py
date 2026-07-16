@@ -1,21 +1,27 @@
 """Train and evaluate a TDNN for tic detection and group classification."""
 
-import argparse
-import csv
 import math
 from pathlib import Path
-import time
 
 import pandas as pd
 import torch
-import torchaudio
 from torch import nn
-from torch.utils.data import DataLoader
 
 from bin.detection_datasets import SpecDataset
-from bin.make_splits import load_split
 from bin.detection_metrics import get_group_metrics, get_tic_metrics
 from bin.detection_models import ResNet34, TCNN, TDNN
+from bin.training_functions import (
+    append_log,
+    initialize_log,
+    load_fold,
+    make_data_loaders,
+    make_transform,
+    parse_training_args,
+    print_epoch_timing,
+    print_fold_time,
+    print_metrics,
+    start_timer,
+)
 
 
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
@@ -27,9 +33,6 @@ EPOCHS = 10
 BATCH_SIZE = 64
 LEARNING_RATE = 0.0001
 NUM_WORKERS = 0
-N_MELS = 80
-N_MFCC = 40
-SAMPLE_RATE = 16000
 
 MODEL_CLASSES = {
     "TDNN": TDNN,
@@ -49,63 +52,6 @@ LOG_FIELDS = [
     "group_accuracy",
     "group_macro_f1",
 ]
-
-
-def make_transform(feature_name):
-    """Create the selected audio transform and return its feature dimension."""
-    if feature_name == "Spectrogram":
-        return torchaudio.transforms.Spectrogram(n_fft=400, hop_length=160), 201
-    if feature_name == "MelSpectrogram":
-        transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=SAMPLE_RATE,
-            n_fft=400,
-            hop_length=160,
-            n_mels=N_MELS,
-        )
-        return transform, N_MELS
-    if feature_name == "MFCC":
-        transform = torchaudio.transforms.MFCC(
-            sample_rate=SAMPLE_RATE,
-            n_mfcc=N_MFCC,
-            melkwargs={"n_fft": 400, "hop_length": 160, "n_mels": N_MELS},
-        )
-        return transform, N_MFCC
-    raise ValueError(f"Unknown feature name: {feature_name}")
-
-
-def parse_args():
-    """Read command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Train tic detection on one cross-validation fold."
-    )
-    parser.add_argument(
-        "--fold",
-        type=int,
-        default=1,
-        help="Fold number to run (default: 1)",
-    )
-    parser.add_argument(
-        "--model-name",
-        "--model_name",
-        choices=MODEL_CLASSES,
-        default=MODEL_NAME,
-        help=f"Model architecture (default: {MODEL_NAME})",
-    )
-    parser.add_argument(
-        "--split-by",
-        "--split_by",
-        choices=["participant", "session", "file"],
-        default=SPLIT_BY,
-        help=f"Cross-validation split unit (default: {SPLIT_BY})",
-    )
-    parser.add_argument(
-        "--feat-name",
-        "--feat_name",
-        choices=["Spectrogram", "MelSpectrogram", "MFCC"],
-        default=FEAT_NAME,
-        help=f"Input feature transform (default: {FEAT_NAME})",
-    )
-    return parser.parse_args()
 
 
 def calculate_loss(
@@ -252,58 +198,22 @@ def evaluate(
     return metrics, pd.DataFrame(prediction_rows)
 
 
-def print_metrics(split_name, metrics):
-    """Print one compact line containing every evaluation metric."""
-    values = " | ".join(f"{name}={value:.4f}" for name, value in metrics.items())
-    print(f"{split_name}: {values}")
-
-
-def format_duration(seconds):
-    """Format a duration compactly as MM:SS or HH:MM:SS."""
-    seconds = max(0, round(seconds))
-    hours, remainder = divmod(seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    if hours:
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
-    return f"{minutes:02}:{seconds:02}"
-
-
-def initialize_log(log_path):
-    """Create a new structured metrics log for one fold."""
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w", newline="", encoding="utf-8") as file:
-        csv.DictWriter(file, fieldnames=LOG_FIELDS).writeheader()
-
-
-def append_log(log_path, fold, epoch, split_name, metrics):
-    """Append one epoch and split to the structured fold log."""
-    row = {"fold": fold, "epoch": epoch, "split": split_name, **metrics}
-    with log_path.open("a", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=LOG_FIELDS)
-        writer.writerow(row)
-
-
 def main():
-    args = parse_args()
+    args = parse_training_args(
+        description="Train tic detection on one cross-validation fold.",
+        model_classes=MODEL_CLASSES,
+        default_model=MODEL_NAME,
+        default_split=SPLIT_BY,
+        default_feature=FEAT_NAME,
+    )
     global_name = f"{args.model_name}_{args.feat_name}_by{args.split_by}"
     model_dir = Path("models/detection") / global_name
     output_dir = Path("outputs/detection") / global_name
     torch.manual_seed(42)
-    if not SPLIT_PATH.exists():
-        raise FileNotFoundError(
-            f"No saved split found at {SPLIT_PATH}; "
-            "run 04_generate_new_split.py first"
-        )
-    splits = load_split(SPLIT_PATH)
-    print(f"Loaded splits from {SPLIT_PATH}")
-    if args.fold not in splits:
-        raise ValueError(
-            f"Fold {args.fold} is unavailable; choose from {sorted(splits)}"
-        )
-    fold = splits[args.fold]
+    fold = load_fold(SPLIT_PATH, args.fold)
     fold_model_dir = model_dir / f"fold{args.fold}"
     log_path = model_dir / f"fold{args.fold}.log"
-    initialize_log(log_path)
+    initialize_log(log_path, LOG_FIELDS)
 
     transform, input_dim = make_transform(args.feat_name)
     print("Train ", end='')
@@ -323,22 +233,11 @@ def main():
     group_to_index = train_dataset.group_to_index
     index_to_group = train_dataset.index_to_group
 
-    train_loader = DataLoader(
+    train_loader, val_loader, test_loader = make_data_loaders(
         train_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=True,
-        num_workers=NUM_WORKERS,
-    )
-    val_loader = DataLoader(
         val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-    )
-    test_loader = DataLoader(
         test_dataset,
         batch_size=BATCH_SIZE,
-        shuffle=False,
         num_workers=NUM_WORKERS,
     )
 
@@ -355,9 +254,9 @@ def main():
     best_auroc = float("-inf")
     best_epoch = None
     best_path = fold_model_dir / "best.pt"
-    training_start = time.perf_counter()
+    training_start = start_timer()
     for epoch in range(1, EPOCHS + 1):
-        epoch_start = time.perf_counter()
+        epoch_start = start_timer()
         train_one_epoch(
             model,
             train_loader,
@@ -382,19 +281,13 @@ def main():
             index_to_group,
             device,
         )
-        elapsed = time.perf_counter() - training_start
-        epoch_duration = time.perf_counter() - epoch_start
-        remaining = elapsed / epoch * (EPOCHS - epoch)
-        print(
-            f"\nEpoch {epoch}/{EPOCHS} | "
-            f"elapsed {format_duration(elapsed)} | "
-            f"epoch {format_duration(epoch_duration)} | "
-            f"ETA {format_duration(remaining)}"
-        )
+        print_epoch_timing(epoch, EPOCHS, training_start, epoch_start)
         print_metrics("train", train_metrics)
         print_metrics("val", val_metrics)
-        append_log(log_path, args.fold, epoch, "train", train_metrics)
-        append_log(log_path, args.fold, epoch, "val", val_metrics)
+        append_log(
+            log_path, LOG_FIELDS, args.fold, epoch, "train", train_metrics
+        )
+        append_log(log_path, LOG_FIELDS, args.fold, epoch, "val", val_metrics)
 
         checkpoint = {
             "epoch": epoch,
@@ -450,8 +343,7 @@ def main():
         output_dir / f"fold{args.fold}_test.csv", index=False
     )
     print(f"Saved predictions to {output_dir}")
-    total_time = time.perf_counter() - training_start
-    print(f"Fold {args.fold} total time: {format_duration(total_time)}")
+    print_fold_time(args.fold, training_start)
 
 
 if __name__ == "__main__":
