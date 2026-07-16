@@ -25,14 +25,14 @@ from bin.models import ResNet34, TCNN, TDNN
 
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
 SPLIT_PATH = Path("splits.json")
-MODEL_NAME = "TDNN"
+MODEL_NAME = "ResNet34"
 SPLIT_BY = "session"
 FEAT_NAME = "MFCC"
 GLOBAL_NAME = f"{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}"
 MODEL_DIR = Path("models/detection") / GLOBAL_NAME
 OUTPUT_DIR = Path("outputs/detection") / GLOBAL_NAME
 EPOCHS = 10
-BATCH_SIZE = 16
+BATCH_SIZE = 64
 LEARNING_RATE = 0.0005
 NUM_WORKERS = 0
 N_MELS = 80

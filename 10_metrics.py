@@ -9,9 +9,8 @@ from bin.make_splits import load_split
 from bin.metrics import get_group_metrics, get_tic_metrics
 
 
-GLOBAL_NAME = "TDNN_MFCC_bysession"
 K_FOLDS = 5
-OUTPUT_DIR = Path("outputs/detection") / GLOBAL_NAME
+OUTPUT_ROOT = Path("outputs/detection")
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
 SPLIT_PATH = Path("splits.json")
 
@@ -132,11 +131,23 @@ def filter_by_training_presence(predictions, train_types, presence):
     return predictions.loc[selected].reset_index(drop=True)
 
 
-def collect_metrics(split_name, folds=None, metadata=None, presence=None):
+def get_global_names():
+    """Return all experiment directory names under outputs/detection."""
+    if not OUTPUT_ROOT.exists():
+        raise FileNotFoundError(f"Missing output directory: {OUTPUT_ROOT}")
+    names = sorted(path.name for path in OUTPUT_ROOT.iterdir() if path.is_dir())
+    if not names:
+        raise ValueError(f"No experiment directories found in {OUTPUT_ROOT}")
+    return names
+
+
+def collect_metrics(
+    global_name, split_name, folds=None, metadata=None, presence=None
+):
     """Load one prediction table for each fold of a split."""
     rows = []
     for fold in range(1, K_FOLDS + 1):
-        csv_path = OUTPUT_DIR / f"fold{fold}_{split_name}.csv"
+        csv_path = OUTPUT_ROOT / global_name / f"fold{fold}_{split_name}.csv"
         if not csv_path.exists():
             raise FileNotFoundError(f"Missing prediction file: {csv_path}")
         predictions = load_predictions(csv_path)
@@ -151,53 +162,67 @@ def collect_metrics(split_name, folds=None, metadata=None, presence=None):
     return pd.DataFrame(rows, columns=METRIC_NAMES)
 
 
-def summary_table(validation, test):
-    """Return fold-level means and sample standard deviations."""
-    return pd.DataFrame(
-        {
-            "Validation mean": validation.mean(),
-            "Validation std": validation.std(ddof=1),
-            "Test mean": test.mean(),
-            "Test std": test.std(ddof=1),
-        }
-    )
+def formatted_summary(metrics):
+    """Return each metric as a 'mean (±std)' string across folds."""
+    if metrics.empty:
+        return pd.Series("N/A", index=METRIC_NAMES)
 
-
-def print_table(title, validation, test):
-    """Print one aggregate table, or report that no matching tics exist."""
-    print(f"\n{title}\n")
-    if validation.empty and test.empty:
-        print("No matching tic types were found.")
-        return
-    print(summary_table(validation, test).to_string(float_format=lambda x: f"{x:.4f}"))
+    means = metrics.mean()
+    standard_deviations = metrics.std(ddof=1)
+    values = {}
+    for metric in METRIC_NAMES:
+        mean = means[metric]
+        deviation = standard_deviations[metric]
+        if pd.isna(mean):
+            values[metric] = "N/A"
+        elif pd.isna(deviation):
+            values[metric] = f"{mean:.4f} (±N/A)"
+        else:
+            values[metric] = f"{mean:.4f} (±{deviation:.4f})"
+    return pd.Series(values)
 
 
 def main():
-    validation = collect_metrics("val")
-    test = collect_metrics("test")
-    print_table(
-        f"Global metrics across {K_FOLDS} folds: {GLOBAL_NAME}",
-        validation,
-        test,
-    )
-
     folds = load_split(SPLIT_PATH)
     metadata = pd.read_csv(METADATA_PATH, dtype={"Type": str})
     metadata["ID"] = metadata["ID"].astype(str).str.upper()
     metadata["Phase"] = metadata["Phase"].astype(str).str.upper()
     metadata["Sess"] = metadata["Sess"].astype(int)
 
-    for presence, title in (
-        ("seen", "Metrics for tic types present in training"),
-        ("unseen", "Metrics for tic types absent from training"),
-    ):
-        validation_subset = collect_metrics(
-            "val", folds=folds, metadata=metadata, presence=presence
+    column_order = [
+        "Validation - all",
+        "Validation - seen",
+        "Validation - unseen",
+        "Test - all",
+        "Test - seen",
+        "Test - unseen",
+    ]
+    for global_name in get_global_names():
+        results = {
+            "Validation - all": collect_metrics(global_name, "val"),
+            "Test - all": collect_metrics(global_name, "test"),
+        }
+        for presence in ("seen", "unseen"):
+            results[f"Validation - {presence}"] = collect_metrics(
+                global_name,
+                "val",
+                folds=folds,
+                metadata=metadata,
+                presence=presence,
+            )
+            results[f"Test - {presence}"] = collect_metrics(
+                global_name,
+                "test",
+                folds=folds,
+                metadata=metadata,
+                presence=presence,
+            )
+
+        table = pd.DataFrame(
+            {column: formatted_summary(results[column]) for column in column_order}
         )
-        test_subset = collect_metrics(
-            "test", folds=folds, metadata=metadata, presence=presence
-        )
-        print_table(title, validation_subset, test_subset)
+        print(f"\nMetrics across {K_FOLDS} folds: {global_name}\n")
+        print(table.to_string())
 
 
 if __name__ == "__main__":

@@ -352,23 +352,23 @@ graphs/training_curve/{GLOBAL_NAME}.png
 
 ## 10. Metrics across folds
 
-Configure `GLOBAL_NAME` and `K_FOLDS` in `10_metrics.py`, then run:
+Configure `K_FOLDS` in `10_metrics.py`, then run:
 
 ```bash
 python 10_metrics.py
 ```
 
-The script loads every validation and test prediction table, calculates metrics separately for each fold, and prints their fold-level mean and sample standard deviation. In addition to global metrics, it uses `splits.json` and the source metadata to report separate tables for tic types present in that fold's training split and tic types absent from it. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined. Rows whose real or predicted group contains `+` are excluded from group metrics but remain part of tic-detection metrics.
+The script discovers every experiment folder under `outputs/detection/`, then loads every validation and test prediction table and calculates metrics separately for each fold. It prints one combined table per experiment whose columns cover validation/test results for all, seen, and unseen tic types. Every cell is formatted as `mean (±std)` across contributing folds. It uses `splits.json` and the source metadata to identify types present or absent in each fold's training split. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined. Rows whose real or predicted group contains `+` are excluded from group metrics but remain part of tic-detection metrics.
 
 ## 11. Confusion matrices
 
-Configure `GLOBAL_NAME` and `K_FOLDS` in `11_make_graphs.py`, then run:
+Run:
 
 ```bash
 python 11_make_graphs.py
 ```
 
-The script combines test and validation predictions across folds and draws four confusion matrices:
+The script discovers every experiment folder under `outputs/detection/` and calls `bin.graphs.confusion_matrix.make_confusion_matrix(input_path, output_path)`. The reusable helper accepts any experiment directory containing `fold*_test.csv` and `fold*_val.csv`, so it can also be used with future paths such as `outputs/segmentation/{GLOBAL_NAME}`. For each experiment, it combines test and validation predictions across folds and draws four confusion matrices:
 
 - test and validation tic-versus-no-tic matrices, annotated with sample counts and percentages normalized within each real-label row; and
 - test and validation tic-group matrices after excluding rows whose real or predicted group is `-1` or contains `+`. Zero cells remain white, while every positive count is colored using a logarithmic scale.
@@ -395,6 +395,9 @@ graphs/{GLOBAL_NAME}/confusion_matrices.png
 └── bin/
     ├── __init__.py
     ├── dataset.py
+    ├── graphs/
+    │   ├── __init__.py
+    │   └── confusion_matrix.py
     ├── make_splits.py
     ├── metrics.py
     └── models.py
