@@ -121,7 +121,7 @@ def make_data_loaders(
 
 def print_metrics(split_name, metrics):
     """Print one compact line containing every evaluation metric."""
-    values = " | ".join(f"{name}={value:.4f}" for name, value in metrics.items())
+    values = "\t| ".join(f"{name}={value:.4f}" for name, value in metrics.items())
     print(f"{split_name}: {values}")
 
 
@@ -161,7 +161,7 @@ def print_epoch_timing(epoch, total_epochs, training_start, epoch_start):
     epoch_duration = now - epoch_start
     remaining = elapsed / epoch * (total_epochs - epoch)
     print(
-        f"\nEpoch {epoch}/{total_epochs} | "
+        f"\nEpoch {epoch}/{total_epochs}\t| "
         f"elapsed {format_duration(elapsed)} | "
         f"epoch {format_duration(epoch_duration)} | "
         f"ETA {format_duration(remaining)}"
