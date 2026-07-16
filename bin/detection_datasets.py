@@ -1,4 +1,4 @@
-"""PyTorch datasets for VocalTics experiments."""
+"""Datasets for clip-level tic detection and group classification."""
 
 from array import array
 from pathlib import Path
@@ -182,6 +182,13 @@ class SpecDataset(Dataset):
         if index < 0 or index >= len(self):
             raise IndexError("dataset index out of range")
 
+        row, window_start, tic_type, group_target, has_tic = self._sample_window()
+        waveform = self._load_window(row["AudioPath"], window_start)
+        features = self.transform(waveform)
+        return features, tic_type, group_target, has_tic
+
+    def _sample_window(self):
+        """Select a tic or non-tic row and return its window information."""
         has_tic = torch.rand(1).item() < self.p_tics
         if has_tic:
             row = self._random_row(self.tics)
@@ -199,9 +206,7 @@ class SpecDataset(Dataset):
             tic_type = "-1"
             group_target = torch.zeros(self.num_groups, dtype=torch.float32)
 
-        waveform = self._load_window(row["AudioPath"], window_start)
-        features = self.transform(waveform)
-        return features, tic_type, group_target, has_tic
+        return row, window_start, tic_type, group_target, has_tic
 
     def _group_target(self, value):
         """Convert a '+'-separated group label to a multi-hot vector."""

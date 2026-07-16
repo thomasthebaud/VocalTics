@@ -1,4 +1,4 @@
-"""Neural classifiers inspired by classic x-vector architectures."""
+"""Clip-level tic detection and group classification models."""
 
 import torch
 from torch import nn

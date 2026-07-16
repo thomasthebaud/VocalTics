@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 
 from bin.make_splits import load_split
-from bin.metrics import get_group_metrics, get_tic_metrics
+from bin.detection_metrics import get_group_metrics, get_tic_metrics
 
 
 K_FOLDS = 5

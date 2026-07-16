@@ -9,11 +9,13 @@ Run the numbered scripts in this order:
 1. `01_data_preprocessing.py` creates tic and non-tic segment metadata.
 2. `02_grouping_categories.py` assigns an in-house YGTSS group to each tic segment.
 3. `03_extract_features.py` optionally extracts one WavLM-large tensor per full recording.
-4. `04_train_tic_detection.py` trains one cross-validation fold.
-5. Run script 04 once for every fold.
-6. `05_training_graphs.py` plots training curves across folds.
-7. `10_metrics.py` aggregates validation and test metrics across folds.
-8. `11_make_graphs.py` creates confusion matrices from the test predictions.
+4. `04_generate_new_split.py` generates and saves the cross-validation folds.
+5. `05_train_tic_detection.py` trains one detection cross-validation fold.
+6. `06_train_tic_segmentation.py` trains one segmentation cross-validation fold.
+7. Run the relevant training script once for every fold.
+8. `07_training_graphs.py` plots training curves across folds.
+9. `10_metrics.py` aggregates validation and test detection metrics across folds.
+10. `11_make_graphs.py` creates confusion matrices from saved predictions.
 
 ## Expected data layout
 
@@ -154,12 +156,12 @@ CUDA is used when available; otherwise extraction runs on CPU.
 
 ## Dataset
 
-`bin/dataset.py` defines `SpecDataset`. It receives a metadata file, a list of recording tuples, and a torchaudio transform:
+`bin/detection_datasets.py` defines the clip-level `SpecDataset`. It receives a metadata file, a list of recording tuples, and a torchaudio transform:
 
 ```python
 import torchaudio
 
-from bin.dataset import SpecDataset
+from bin.detection_datasets import SpecDataset
 
 transform = torchaudio.transforms.MFCC(sample_rate=16000, n_mfcc=40)
 
@@ -188,6 +190,12 @@ For every `__getitem__` call, the dataset randomly returns:
 - otherwise, a window sampled entirely inside a non-tic interval that is at least `win_len` seconds long.
 
 PCM WAV frames are loaded with Python's standard `wave` module, converted to mono, and zero-padded when a centered window crosses a file boundary. Torchaudio is used for the feature transforms rather than audio decoding, so the dataset does not require a torchaudio I/O backend. Supported transforms are `Spectrogram`, `MelSpectrogram`, and `MFCC`.
+
+`bin/segmentation_datasets.py` defines another `SpecDataset` with the same
+initialization parameters and a default `p_tics=0.2`. Each item contains only
+the transformed features and a boolean tic-presence array. The labels have the
+same time length as the features and mark every tic annotation overlapping the
+sampled window.
 
 Each item is:
 
@@ -230,9 +238,21 @@ train_recordings = folds[1]["train"]
 
 Use `load_split("splits.json")` to reload the JSON file. Integer fold keys and recording tuples are restored automatically.
 
+The normal workflow is to generate the split once with:
+
+```bash
+python 04_generate_new_split.py --split-by session --k-folds 5 --seed 42
+```
+
+The accepted split units are `participant`, `session`, and `file`. The script
+saves `splits.json` and prints a table describing the recordings, participants,
+participant-session pairs, phases, and participant IDs in every train,
+validation, and test split. Training scripts only load this saved file and
+never overwrite it.
+
 ## Models
 
-`bin/models.py` contains three temporal architectures inspired by x-vector systems:
+`bin/detection_models.py` contains three temporal architectures inspired by x-vector systems:
 
 - `TDNN`: time-delay convolution layers followed by statistics pooling;
 - `ResNet34`: a one-dimensional temporal ResNet-34; and
@@ -241,7 +261,7 @@ Use `load_split("splits.json")` to reload the JSON file. Integer fold keys and r
 All models are initialized with an input feature dimension and number of tic groups:
 
 ```python
-from bin.models import TDNN
+from bin.detection_models import TDNN
 
 model = TDNN(input_dim=40, num_groups=19)
 tic_logits, group_logits = model(features)
@@ -252,12 +272,22 @@ They accept `[batch, features, time]`, `[batch, time, features]`, or `[batch, 1,
 - tic-presence logits shaped `[batch, 2]`; and
 - independent tic-group logits shaped `[batch, num_groups]` for multi-label prediction.
 
+`bin/segmentation_models.py` provides three frame-level tic segmentation models:
+
+- `BiLSTM`;
+- `CNN`; and
+- `CNN_BiLSTM`.
+
+They accept features shaped `[batch, feature_dim, time]` and return one raw
+tic-presence logit per input frame with shape `[batch, time]`. These logits can
+be passed directly to `torch.nn.BCEWithLogitsLoss` during training.
+
 ## Metrics
 
-`bin/metrics.py` implements metrics using PyTorch only:
+`bin/detection_metrics.py` implements detection metrics using PyTorch only:
 
 ```python
-from bin.metrics import get_group_metrics, get_tic_metrics
+from bin.detection_metrics import get_group_metrics, get_tic_metrics
 
 group_accuracy, group_macro_f1 = get_group_metrics(group_pred, group_real)
 
@@ -268,13 +298,29 @@ tic_accuracy, tic_f1, tic_auroc, tic_precision, tic_recall = (
 
 The functions accept logits or predicted labels. Multi-hot all-zero group targets are excluded from group metrics; legacy group targets equal to `-1` are also supported. Tic class `1` is the positive class. AUROC supports tied scores and returns `NaN` when only one real class is present.
 
-## 4. Model training
+`bin/segmentation_metrics.py` provides frame-wise accuracy, F1, and AUROC,
+along with segment-wise accuracy and F1:
 
-`04_train_tic_detection.py` trains one fold at a time. The model, split strategy,
+```python
+from bin.segmentation_metrics import get_segmentation_metrics
+
+frame_accuracy, frame_f1, frame_auroc, segment_accuracy, segment_f1 = (
+    get_segmentation_metrics(frame_logits, frame_targets)
+)
+```
+
+Frame-wise metrics treat each frame as one prediction. Segment-wise metrics
+treat the first dimension as the batch of segments: a segment is positive when
+at least one of its frames is positive. Floating-point inputs are treated as
+logits by default; pass `from_logits=False` for probabilities.
+
+## 5. Detection training
+
+`05_train_tic_detection.py` trains one fold at a time. The model, split strategy,
 and input features can be selected from the command line. For example:
 
 ```bash
-python 04_train_tic_detection.py --fold 1 \
+python 05_train_tic_detection.py --fold 1 \
     --model-name TDNN --split-by session --feat-name MFCC
 ```
 
@@ -289,20 +335,28 @@ The current defaults use 40-dimensional MFCCs computed from 80 mel bins,
 Adam with learning rate `0.0005`, and 10 epochs. Multi-group tic samples are
 used for training and excluded from validation and test sampling.
 
-Generate a new split definition and run a fold with:
+Generate `splits.json` first, then run a detection fold with:
 
 ```bash
-python 04_train_tic_detection.py --fold 1 --newsplit
+python 04_generate_new_split.py --split-by session
+python 05_train_tic_detection.py --fold 1 --split-by session
 ```
 
-Without `--newsplit`, the script reloads the existing `splits.json`. Use the flag only when a new cross-validation assignment should be generated and saved.
+The detection trainer always reloads the existing `splits.json` and reports an
+error directing you to script 04 when it is missing.
 
 Repeat for all folds:
 
 ```bash
 for fold in 1 2 3 4 5; do
-    python 04_train_tic_detection.py --fold "$fold"
+    python 05_train_tic_detection.py --fold "$fold"
 done
+```
+
+The provided launcher runs its configured detection experiment over all folds:
+
+```bash
+sh launch_all_detection_trainings.sh
 ```
 
 The training loss is the sum of:
@@ -341,14 +395,46 @@ Prediction tables contain:
 tic_type,tic_group,tic_real,tic_pred,tic_probability,group_pred,group_probability
 ```
 
-The cross-validation definition is saved as `splits.json` when `--newsplit` is used. Otherwise, the latest saved JSON is loaded.
+The cross-validation definition is always loaded from `splits.json`.
 
-## 5. Training curves
+## 6. Segmentation training
 
-After all folds have been trained, configure `GLOBAL_NAME` and `K_FOLDS` in `05_training_graphs.py`, then run:
+`06_train_tic_segmentation.py` follows the same fold and command-line structure
+for frame-level segmentation. For example:
 
 ```bash
-python 05_training_graphs.py
+python 06_train_tic_segmentation.py --fold 1 \
+    --model-name BiLSTM --split-by session --feat-name MFCC
+```
+
+After `splits.json` has been created by script 04, run the configured segmentation experiment
+over every fold with:
+
+```bash
+sh launch_all_segmentation_trainings.sh
+```
+
+The available models are `BiLSTM`, `CNN`, and `CNN_BiLSTM`. Training uses the
+segmentation `SpecDataset` with `p_tics=0.2` and `BCEWithLogitsLoss`. Each epoch
+logs frame accuracy, frame F1, frame AUROC, segment accuracy, and segment F1.
+The checkpoint with the highest validation frame AUROC is saved as `best.pt`.
+Models, logs, and validation/test prediction tables are written under:
+
+```text
+models/segmentation/{GLOBAL_NAME}/
+outputs/segmentation/{GLOBAL_NAME}/
+```
+
+Prediction CSV files contain one row per feature frame, including its segment
+ID, frame truth/prediction/probability, and the reduced segment truth and
+prediction.
+
+## 7. Training curves
+
+After all folds have been trained, configure `GLOBAL_NAME` and `K_FOLDS` in `07_training_graphs.py`, then run:
+
+```bash
+python 07_training_graphs.py
 ```
 
 The script loads every structured fold log and uses Seaborn to plot mean train/validation loss and tic AUROC per epoch with a 95% confidence interval across folds. The figure is saved to:
@@ -393,21 +479,28 @@ graphs/{GLOBAL_NAME}/confusion_matrices.png
 ├── 01_data_preprocessing.py
 ├── 02_grouping_categories.py
 ├── 03_extract_features.py
-├── 04_train_tic_detection.py
-├── 05_training_graphs.py
+├── 04_generate_new_split.py
+├── 05_train_tic_detection.py
+├── 06_train_tic_segmentation.py
+├── 07_training_graphs.py
 ├── 10_metrics.py
 ├── 11_make_graphs.py
 ├── Master Tic Record.xlsx
 ├── README.md
+├── launch_all_detection_trainings.sh
+├── launch_all_segmentation_trainings.sh
 └── bin/
     ├── __init__.py
-    ├── dataset.py
+    ├── detection_datasets.py
     ├── graphs/
     │   ├── __init__.py
     │   └── confusion_matrix.py
     ├── make_splits.py
-    ├── metrics.py
-    └── models.py
+    ├── detection_metrics.py
+    ├── detection_models.py
+    ├── segmentation_datasets.py
+    ├── segmentation_metrics.py
+    └── segmentation_models.py
 ```
 
 ## Generated artifacts

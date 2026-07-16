@@ -1,4 +1,4 @@
-"""Evaluation metrics for tic presence and tic group predictions."""
+"""Metrics for clip-level tic detection and group classification."""
 
 import torch
 
