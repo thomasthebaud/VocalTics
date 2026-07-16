@@ -2,42 +2,41 @@
 
 import math
 
+import pandas as pd
 import torch
 
-from bin.detection_datasets import SpecDataset as DetectionSpecDataset
+from bin.detection_datasets import (
+    Detection_Dataset,
+    SUPPORTED_TRANSFORMS,
+    _load_audio_window,
+    _load_embedding_window,
+)
 
 
-class SpecDataset(DetectionSpecDataset):
-    """Return transformed windows and one boolean tic label per feature frame."""
+class Segmentation_Dataset(Detection_Dataset):
+    """Common sampling and frame-target logic for segmentation datasets."""
 
     def __init__(
         self,
         metadata_file,
         participant_phase_sessions,
-        transform,
         win_len=10,
         p_tics=0.2,
         include_multigroup=True,
     ):
         super().__init__(
-            metadata_file=metadata_file,
-            participant_phase_sessions=participant_phase_sessions,
-            transform=transform,
-            win_len=win_len,
-            p_tics=p_tics,
-            include_multigroup=include_multigroup,
+            metadata_file,
+            participant_phase_sessions,
+            win_len,
+            p_tics,
+            include_multigroup,
         )
 
     def __getitem__(self, index):
         """Return features and boolean tic-presence labels over feature time."""
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError("dataset index out of range")
-
+        self._validate_index(index)
         row, window_start, _, _, _ = self._sample_window()
-        waveform = self._load_window(row["AudioPath"], window_start)
-        features = self.transform(waveform)
+        features = self._load_features(row, window_start)
         labels = self._frame_labels(
             audio_path=row["AudioPath"],
             window_start=window_start,
@@ -65,3 +64,74 @@ class SpecDataset(DetectionSpecDataset):
             last_frame = max(first_frame + 1, min(last_frame, num_frames))
             labels[first_frame:last_frame] = True
         return labels
+
+
+class SpecDataset(Segmentation_Dataset):
+    """Segmentation dataset computing spectrogram features from PCM audio."""
+
+    def __init__(
+        self,
+        metadata_file,
+        participant_phase_sessions,
+        transform,
+        win_len=10,
+        p_tics=0.2,
+        include_multigroup=True,
+    ):
+        if not isinstance(transform, SUPPORTED_TRANSFORMS):
+            raise TypeError(
+                "transform must be a torchaudio Spectrogram, "
+                "MelSpectrogram, or MFCC"
+            )
+        self.transform = transform
+        super().__init__(
+            metadata_file,
+            participant_phase_sessions,
+            win_len,
+            p_tics,
+            include_multigroup,
+        )
+
+    def _load_features(self, row, window_start):
+        waveform = _load_audio_window(
+            row["AudioPath"], window_start, self.win_len
+        )
+        return self.transform(waveform)
+
+
+class WavLmDataset(Segmentation_Dataset):
+    """Segmentation dataset loading pre-computed recording-level WavLM tensors."""
+
+    def __init__(
+        self,
+        metadata_file,
+        participant_phase_sessions,
+        win_len=10,
+        p_tics=0.2,
+        include_multigroup=True,
+        frames_per_second=50,
+    ):
+        if frames_per_second <= 0:
+            raise ValueError("frames_per_second must be greater than zero")
+        self.frames_per_second = float(frames_per_second)
+        super().__init__(
+            metadata_file,
+            participant_phase_sessions,
+            win_len,
+            p_tics,
+            include_multigroup,
+        )
+        if "embedding_path" not in self.metadata.columns:
+            raise ValueError("WavLM metadata must contain an embedding_path column")
+
+    def _load_features(self, row, window_start):
+        embedding_path = row["embedding_path"]
+        if pd.isna(embedding_path):
+            raise ValueError(f"Missing embedding_path for {row['AudioPath']}")
+        return _load_embedding_window(
+            embedding_path=embedding_path,
+            window_start=window_start,
+            win_len=self.win_len,
+            audio_duration=self.audio_durations[row["AudioPath"]],
+            frames_per_second=self.frames_per_second,
+        )

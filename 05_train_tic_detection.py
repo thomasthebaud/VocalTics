@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch import nn
 
-from bin.detection_datasets import SpecDataset
+from bin.detection_datasets import SpecDataset, WavLmDataset
 from bin.detection_metrics import get_group_metrics, get_tic_metrics
 from bin.detection_models import ResNet34, TCNN, TDNN
 from bin.training_functions import (
@@ -25,6 +25,7 @@ from bin.training_functions import (
 
 
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
+WAVLM_METADATA_PATH = Path("/projects/vocaltics/data/wavlm_embeddings/metadata.csv")
 SPLIT_PATH = Path("splits.json")
 MODEL_NAME = "ResNet34"
 SPLIT_BY = "session"
@@ -33,6 +34,7 @@ EPOCHS = 10
 BATCH_SIZE = 128
 LEARNING_RATE = 0.0001
 NUM_WORKERS = 0
+WAVLM_INPUT_DIM = 768
 
 MODEL_CLASSES = {
     "TDNN": TDNN,
@@ -215,13 +217,43 @@ def main():
     log_path = model_dir / f"fold{args.fold}.log"
     initialize_log(log_path, LOG_FIELDS)
 
-    transform, input_dim = make_transform(args.feat_name)
+    if args.feat_name == "WavLM":
+        dataset_class = WavLmDataset
+        metadata_path = WAVLM_METADATA_PATH
+        dataset_kwargs = {}
+        input_dim = WAVLM_INPUT_DIM
+    else:
+        dataset_class = SpecDataset
+        metadata_path = METADATA_PATH
+        transform, input_dim = make_transform(args.feat_name)
+        dataset_kwargs = {"transform": transform}
+
     print("Train ", end='')
-    train_dataset = SpecDataset(METADATA_PATH, fold["train"], transform, win_len=10, p_tics=0.5)
+    train_dataset = dataset_class(
+        metadata_path,
+        fold["train"],
+        win_len=10,
+        p_tics=0.5,
+        **dataset_kwargs,
+    )
     print("Val ", end='')
-    val_dataset = SpecDataset(METADATA_PATH, fold["val"], transform, win_len=10, p_tics=0.5,include_multigroup=False)
+    val_dataset = dataset_class(
+        metadata_path,
+        fold["val"],
+        win_len=10,
+        p_tics=0.5,
+        include_multigroup=False,
+        **dataset_kwargs,
+    )
     print("Test ", end='')
-    test_dataset = SpecDataset(METADATA_PATH, fold["test"], transform,win_len=10, p_tics=0.5,include_multigroup=False)
+    test_dataset = dataset_class(
+        metadata_path,
+        fold["test"],
+        win_len=10,
+        p_tics=0.5,
+        include_multigroup=False,
+        **dataset_kwargs,
+    )
 
     if not (
         train_dataset.group_to_index

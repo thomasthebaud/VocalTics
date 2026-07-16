@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from torch import nn
 
-from bin.segmentation_datasets import SpecDataset
+from bin.segmentation_datasets import SpecDataset, WavLmDataset
 from bin.segmentation_metrics import get_segmentation_metrics
 from bin.segmentation_models import BiLSTM, CNN, CNN_BiLSTM
 from bin.training_functions import (
@@ -25,6 +25,7 @@ from bin.training_functions import (
 
 
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
+WAVLM_METADATA_PATH = Path("/projects/vocaltics/data/wavlm_embeddings/metadata.csv")
 SPLIT_PATH = Path("splits.json")
 MODEL_NAME = "BiLSTM"
 SPLIT_BY = "session"
@@ -35,6 +36,7 @@ LEARNING_RATE = 0.0001
 NUM_WORKERS = 0
 WIN_LEN = 10
 P_TICS = 0.2
+WAVLM_INPUT_DIM = 768
 
 MODEL_CLASSES = {
     "BiLSTM": BiLSTM,
@@ -150,18 +152,40 @@ def main():
     log_path = model_dir / f"fold{args.fold}.log"
     initialize_log(log_path, LOG_FIELDS)
 
-    transform, input_dim = make_transform(args.feat_name)
+    if args.feat_name == "WavLM":
+        dataset_class = WavLmDataset
+        metadata_path = WAVLM_METADATA_PATH
+        dataset_kwargs = {}
+        input_dim = WAVLM_INPUT_DIM
+    else:
+        dataset_class = SpecDataset
+        metadata_path = METADATA_PATH
+        transform, input_dim = make_transform(args.feat_name)
+        dataset_kwargs = {"transform": transform}
+
     print("Train ", end="")
-    train_dataset = SpecDataset(
-        METADATA_PATH, fold["train"], transform, win_len=WIN_LEN, p_tics=P_TICS
+    train_dataset = dataset_class(
+        metadata_path,
+        fold["train"],
+        win_len=WIN_LEN,
+        p_tics=P_TICS,
+        **dataset_kwargs,
     )
     print("Val ", end="")
-    val_dataset = SpecDataset(
-        METADATA_PATH, fold["val"], transform, win_len=WIN_LEN, p_tics=P_TICS
+    val_dataset = dataset_class(
+        metadata_path,
+        fold["val"],
+        win_len=WIN_LEN,
+        p_tics=P_TICS,
+        **dataset_kwargs,
     )
     print("Test ", end="")
-    test_dataset = SpecDataset(
-        METADATA_PATH, fold["test"], transform, win_len=WIN_LEN, p_tics=P_TICS
+    test_dataset = dataset_class(
+        metadata_path,
+        fold["test"],
+        win_len=WIN_LEN,
+        p_tics=P_TICS,
+        **dataset_kwargs,
     )
 
     train_loader, val_loader, test_loader = make_data_loaders(

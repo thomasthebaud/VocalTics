@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from bin.make_splits import load_split
 
 
-FEATURE_NAMES = ["Spectrogram", "MelSpectrogram", "MFCC"]
+FEATURE_NAMES = ["Spectrogram", "MelSpectrogram", "MFCC", "WavLM"]
 SPLIT_NAMES = ["participant", "session", "file"]
 
 

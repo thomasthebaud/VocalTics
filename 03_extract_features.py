@@ -1,4 +1,4 @@
-"""Extract WavLM-large embeddings for every audio recording."""
+"""Extract WavLM Base Plus embeddings for every audio recording."""
 
 from pathlib import Path
 
@@ -54,9 +54,9 @@ def main():
     metadata = pd.read_csv(METADATA_PATH, dtype={"Type": str, "Group": str})
     # Select a GPU when one is available, otherwise use the CPU.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # Load the input processor associated with WavLM-large.
+    # Load the input processor associated with WavLM Base Plus.
     feature_extractor = AutoFeatureExtractor.from_pretrained(MODEL_NAME)
-    # Load WavLM-large, switch off training behavior, and move it to the device.
+    # Load WavLM Base Plus, disable training behavior, and move it to the device.
     model = WavLMModel.from_pretrained(MODEL_NAME).eval().to(device)
     # Create the root directory that will contain embeddings and new metadata.
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)

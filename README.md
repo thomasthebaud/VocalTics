@@ -8,7 +8,7 @@ Run the numbered scripts in this order:
 
 1. `01_data_preprocessing.py` creates tic and non-tic segment metadata.
 2. `02_grouping_categories.py` assigns an in-house YGTSS group to each tic segment.
-3. `03_extract_features.py` optionally extracts one WavLM-large tensor per full recording.
+3. `03_extract_features.py` optionally extracts one WavLM Base Plus tensor per full recording.
 4. `04_generate_new_split.py` generates and saves the cross-validation folds.
 5. `05_train_tic_detection.py` trains one detection cross-validation fold.
 6. `06_train_tic_segmentation.py` trains one segmentation cross-validation fold.
@@ -43,8 +43,6 @@ ID,Sess,Phase,Type,StartTime,EndTime,Duration
 
 Paths are constants near the top of each numbered script and can be changed for another environment.
 
-> **Path note:** `03_extract_features.py` currently writes to `/project/vocaltics/data/wavlm_embeddings/` (singular `project`), while the other data paths use `/projects/vocaltics/data/` (plural `projects`).
-
 ## Dependencies
 
 The full pipeline uses:
@@ -55,16 +53,22 @@ The full pipeline uses:
 - torchaudio
 - Hugging Face Transformers
 - tqdm
+- SoundFile with libsndfile support
 - Matplotlib
 - Seaborn
 
 A minimal installation command is:
 
 ```bash
-pip install pandas torch torchaudio transformers tqdm matplotlib seaborn
+pip install pandas torch torchaudio transformers tqdm soundfile matplotlib seaborn
 ```
 
-Install matching PyTorch and torchaudio builds for the target CPU or CUDA environment. WavLM extraction also requires access to download `microsoft/wavlm-large` from Hugging Face unless it is already cached.
+The pip package is named `soundfile`; it provides Python access to libsndfile.
+On common 64-bit Linux installations, its binary wheel also includes the
+libsndfile library. If pip installs from source instead, libsndfile must be
+provided by the system package manager.
+
+Install matching PyTorch and torchaudio builds for the target CPU or CUDA environment. WavLM extraction also requires access to download `microsoft/wavlm-base-plus` from Hugging Face unless it is already cached.
 
 ## 1. Data preprocessing
 
@@ -139,25 +143,27 @@ Run:
 python 03_extract_features.py
 ```
 
-The script loads `microsoft/wavlm-base-plus`, converts each recording to mono, resamples it to the model sampling rate, and processes it in 30-second windows. The contextual `last_hidden_state` tensors are concatenated over time.
+The script loads `microsoft/wavlm-base-plus`, converts each recording to mono, resamples it to the model sampling rate, and processes it in 30-second windows. The contextual 768-dimensional `last_hidden_state` tensors are concatenated over time.
 
 One tensor is saved per full audio file:
 
 ```text
-/project/vocaltics/data/wavlm_embeddings/{participant}/{audio_stem}.pt
+/projects/vocaltics/data/wavlm_embeddings/{participant}/{audio_stem}.pt
 ```
 
 All metadata segments belonging to the same recording reference the same tensor. A copied metadata file containing an `embedding_path` column is saved as:
 
 ```text
-/project/vocaltics/data/wavlm_embeddings/metadata.csv
+/projects/vocaltics/data/wavlm_embeddings/metadata.csv
 ```
 
 CUDA is used when available; otherwise extraction runs on CPU.
 
 ## Dataset
 
-`bin/detection_datasets.py` defines the clip-level `SpecDataset`. It receives a metadata file, a list of recording tuples, and a torchaudio transform:
+`bin/detection_datasets.py` defines a shared `Detection_Dataset` parent with two
+feature-specific children. `SpecDataset` loads PCM audio and computes a
+torchaudio transform:
 
 ```python
 import torchaudio
@@ -179,6 +185,20 @@ dataset = SpecDataset(
 )
 ```
 
+`WavLmDataset` uses the same sampling and target logic but loads the
+recording-level tensors created by script 03:
+
+```python
+from bin.detection_datasets import WavLmDataset
+
+dataset = WavLmDataset(
+    metadata_file="/projects/vocaltics/data/wavlm_embeddings/metadata.csv",
+    participant_phase_sessions=[("DET0101", "NO", 1)],
+    win_len=10,
+    p_tics=0.5,
+)
+```
+
 The tuple order is always:
 
 ```python
@@ -192,17 +212,28 @@ For every `__getitem__` call, the dataset randomly returns:
 
 PCM WAV frames are loaded with Python's standard `wave` module, converted to mono, and zero-padded when a centered window crosses a file boundary. Torchaudio is used for the feature transforms rather than audio decoding, so the dataset does not require a torchaudio I/O backend. Supported transforms are `Spectrogram`, `MelSpectrogram`, and `MFCC`.
 
-`bin/segmentation_datasets.py` defines another `SpecDataset` with the same
-initialization parameters and a default `p_tics=0.2`. Each item contains only
-the transformed features and a boolean tic-presence array. The labels have the
-same time length as the features and mark every tic annotation overlapping the
-sampled window.
-
-Each item is:
+Detection dataset items are:
 
 ```python
 features, tic_type, group_target, has_tic
 ```
+
+`bin/segmentation_datasets.py` similarly defines a shared
+`Segmentation_Dataset` parent and the children `SpecDataset` and
+`WavLmDataset`. Both default to `p_tics=0.2` and return only:
+
+```python
+features, frame_labels
+```
+
+`frame_labels` is a boolean tensor with the same time length as the features
+and marks every tic annotation overlapping the sampled window.
+
+Both WavLM datasets require an `embedding_path` metadata column. They load the
+full `(time, embedding_dim)` tensor, select the sampled recording interval,
+transpose it to `(embedding_dim, time)`, and pad boundaries with zeros. WavLM
+features default to 50 frames per second, producing 500 frames for a 10-second
+window; this can be changed with `frames_per_second`.
 
 `group_target` is a multi-hot vector using the stable `dataset.group_to_index` mapping built from the full metadata. A single-group tic has one active position, while a combined tic has one active position for every component group. Non-tic samples return `tic_type="-1"`, an all-zero group vector, and `has_tic=False`.
 
@@ -210,7 +241,9 @@ Initialization prints the number of unique tic groups and individual tic types a
 
 The dataset is stochastic: its index is bounds-checked, but sampling is random and can select metadata rows with replacement.
 
-Set `include_multigroup=False` to prevent tic windows with multiple real groups from being sampled. Script 04 enables this option for the test dataset only; training and validation retain multi-group tic samples.
+Set `include_multigroup=False` to prevent tic windows with multiple real groups
+from being sampled. Script 05 enables this option for validation and test
+detection datasets.
 
 ## Cross-validation splits
 
@@ -327,13 +360,19 @@ python 05_train_tic_detection.py --fold 1 \
 
 The accepted models are `TDNN`, `ResNet34`, and `TCNN`; split strategies are
 `participant`, `session`, and `file`; and features are `Spectrogram`,
-`MelSpectrogram`, and `MFCC`. The existing constants remain the command-line
-defaults. The global experiment name is built as
+`MelSpectrogram`, `MFCC`, and `WavLM`. The existing constants remain the
+command-line defaults. The global experiment name is built as
 `{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}` from the selected arguments.
 
+When `--feat-name WavLM` is selected, the trainer uses `WavLmDataset`, reads
+`/projects/vocaltics/data/wavlm_embeddings/metadata.csv`, and configures the
+model for WavLM Base Plus's 768-dimensional embeddings. Script 03 must be run
+before WavLM training. Other feature names use `SpecDataset` and compute their
+transform from audio during sampling.
+
 The current defaults use 40-dimensional MFCCs computed from 80 mel bins,
-10-second windows, a 50/50 tic/non-tic sampling probability, batch size 64,
-Adam with learning rate `0.0005`, and 10 epochs. Multi-group tic samples are
+10-second windows, a 50/50 tic/non-tic sampling probability, batch size 128,
+Adam with learning rate `0.0001`, and 10 epochs. Multi-group tic samples are
 used for training and excluded from validation and test sampling.
 
 Generate `splits.json` first, then run a detection fold with:
@@ -415,9 +454,11 @@ over every fold with:
 sh launch_all_segmentation_trainings.sh
 ```
 
-The available models are `BiLSTM`, `CNN`, and `CNN_BiLSTM`. Training uses the
-segmentation `SpecDataset` with `p_tics=0.2` and `BCEWithLogitsLoss`. Each epoch
-logs frame accuracy, frame F1, frame AUROC, segment accuracy, and segment F1.
+The available models are `BiLSTM`, `CNN`, and `CNN_BiLSTM`. Spectral features
+use the segmentation `SpecDataset`; `--feat-name WavLM` uses `WavLmDataset`
+and the embedding metadata created by script 03. Both use `p_tics=0.2` and
+`BCEWithLogitsLoss`. Each epoch logs frame accuracy, frame F1, frame AUROC,
+segment accuracy, and segment F1.
 The checkpoint with the lowest validation loss is saved as `best.pt`.
 Models, logs, and validation/test prediction tables are written under:
 
@@ -516,7 +557,7 @@ Generated files are not required to live in the repository. With the default con
 
 ```text
 /projects/vocaltics/data/metadata.csv
-/project/vocaltics/data/wavlm_embeddings/
+/projects/vocaltics/data/wavlm_embeddings/
 splits.json
 models/detection/TDNN_MFCC_bysession/
 outputs/detection/TDNN_MFCC_bysession/
