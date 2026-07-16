@@ -198,10 +198,14 @@ def main():
         "Test - unseen",
     ]
     for global_name in get_global_names():
-        results = {
-            "Validation - all": collect_metrics(global_name, "val"),
-            "Test - all": collect_metrics(global_name, "test"),
-        }
+        try:
+            results = {
+                "Validation - all": collect_metrics(global_name, "val"),
+                "Test - all": collect_metrics(global_name, "test"),
+            }
+        except:
+            print(f"Skipping {global_name} due to missing prediction files")
+            continue
         for presence in ("seen", "unseen"):
             results[f"Validation - {presence}"] = collect_metrics(
                 global_name,
