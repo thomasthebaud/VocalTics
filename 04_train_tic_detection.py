@@ -28,9 +28,6 @@ SPLIT_PATH = Path("splits.json")
 MODEL_NAME = "ResNet34"
 SPLIT_BY = "session"
 FEAT_NAME = "MFCC"
-GLOBAL_NAME = f"{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}"
-MODEL_DIR = Path("models/detection") / GLOBAL_NAME
-OUTPUT_DIR = Path("outputs/detection") / GLOBAL_NAME
 EPOCHS = 10
 BATCH_SIZE = 64
 LEARNING_RATE = 0.0005
@@ -65,11 +62,11 @@ LOG_FIELDS = [
 ]
 
 
-def make_transform():
+def make_transform(feature_name):
     """Create the selected audio transform and return its feature dimension."""
-    if FEAT_NAME == "Spectrogram":
+    if feature_name == "Spectrogram":
         return torchaudio.transforms.Spectrogram(n_fft=400, hop_length=160), 201
-    if FEAT_NAME == "MelSpectrogram":
+    if feature_name == "MelSpectrogram":
         transform = torchaudio.transforms.MelSpectrogram(
             sample_rate=SAMPLE_RATE,
             n_fft=400,
@@ -77,14 +74,14 @@ def make_transform():
             n_mels=N_MELS,
         )
         return transform, N_MELS
-    if FEAT_NAME == "MFCC":
+    if feature_name == "MFCC":
         transform = torchaudio.transforms.MFCC(
             sample_rate=SAMPLE_RATE,
             n_mfcc=N_MFCC,
             melkwargs={"n_fft": 400, "hop_length": 160, "n_mels": N_MELS},
         )
         return transform, N_MFCC
-    raise ValueError(f"Unknown FEAT_NAME: {FEAT_NAME}")
+    raise ValueError(f"Unknown feature name: {feature_name}")
 
 
 def parse_args():
@@ -102,6 +99,27 @@ def parse_args():
         "--newsplit",
         action="store_true",
         help="Generate and save new splits instead of loading splits.json",
+    )
+    parser.add_argument(
+        "--model-name",
+        "--model_name",
+        choices=MODEL_CLASSES,
+        default=MODEL_NAME,
+        help=f"Model architecture (default: {MODEL_NAME})",
+    )
+    parser.add_argument(
+        "--split-by",
+        "--split_by",
+        choices=SPLIT_FUNCTIONS,
+        default=SPLIT_BY,
+        help=f"Cross-validation split unit (default: {SPLIT_BY})",
+    )
+    parser.add_argument(
+        "--feat-name",
+        "--feat_name",
+        choices=["Spectrogram", "MelSpectrogram", "MFCC"],
+        default=FEAT_NAME,
+        help=f"Input feature transform (default: {FEAT_NAME})",
     )
     return parser.parse_args()
 
@@ -273,16 +291,15 @@ def append_log(log_path, fold, epoch, split_name, metrics):
 
 def main():
     args = parse_args()
+    global_name = f"{args.model_name}_{args.feat_name}_by{args.split_by}"
+    model_dir = Path("models/detection") / global_name
+    output_dir = Path("outputs/detection") / global_name
     torch.manual_seed(42)
     metadata = pd.read_csv(
         METADATA_PATH, dtype={"Type": str, "Group": str}
     )
-    if SPLIT_BY not in SPLIT_FUNCTIONS:
-        raise ValueError(f"Unknown SPLIT_BY: {SPLIT_BY}")
-    if MODEL_NAME not in MODEL_CLASSES:
-        raise ValueError(f"Unknown MODEL_NAME: {MODEL_NAME}")
     if args.newsplit:
-        splits = SPLIT_FUNCTIONS[SPLIT_BY](metadata, K=K_FOLDS)
+        splits = SPLIT_FUNCTIONS[args.split_by](metadata, K=K_FOLDS)
         save_split(splits, SPLIT_PATH)
         print(f"Generated and saved new splits to {SPLIT_PATH}")
     else:
@@ -297,11 +314,11 @@ def main():
             f"Fold {args.fold} is unavailable; choose from {sorted(splits)}"
         )
     fold = splits[args.fold]
-    fold_model_dir = MODEL_DIR / f"fold{args.fold}"
-    log_path = MODEL_DIR / f"fold{args.fold}.log"
+    fold_model_dir = model_dir / f"fold{args.fold}"
+    log_path = model_dir / f"fold{args.fold}.log"
     initialize_log(log_path)
 
-    transform, input_dim = make_transform()
+    transform, input_dim = make_transform(args.feat_name)
     print("Train ", end='')
     train_dataset = SpecDataset(METADATA_PATH, fold["train"], transform, win_len=10, p_tics=0.5)
     print("Val ", end='')
@@ -339,14 +356,14 @@ def main():
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MODEL_CLASSES[MODEL_NAME](
+    model = MODEL_CLASSES[args.model_name](
         input_dim=input_dim, num_groups=num_groups
     ).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     tic_loss_function = nn.CrossEntropyLoss()
     group_loss_function = nn.BCEWithLogitsLoss()
     fold_model_dir.mkdir(parents=True, exist_ok=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     best_auroc = float("-inf")
     best_epoch = None
@@ -388,9 +405,9 @@ def main():
             "optimizer_state_dict": optimizer.state_dict(),
             "group_to_index": group_to_index,
             "num_groups": num_groups,
-            "model_name": MODEL_NAME,
-            "feature_name": FEAT_NAME,
-            "split_by": SPLIT_BY,
+            "model_name": args.model_name,
+            "feature_name": args.feat_name,
+            "split_by": args.split_by,
             "fold": args.fold,
             "val_tic_auroc": val_metrics["tic_auroc"],
         }
@@ -430,12 +447,12 @@ def main():
     print("\nTest results")
     print_metrics("test", test_metrics)
     val_predictions.to_csv(
-        OUTPUT_DIR / f"fold{args.fold}_val.csv", index=False
+        output_dir / f"fold{args.fold}_val.csv", index=False
     )
     test_predictions.to_csv(
-        OUTPUT_DIR / f"fold{args.fold}_test.csv", index=False
+        output_dir / f"fold{args.fold}_test.csv", index=False
     )
-    print(f"Saved predictions to {OUTPUT_DIR}")
+    print(f"Saved predictions to {output_dir}")
 
 
 if __name__ == "__main__":

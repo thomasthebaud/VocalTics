@@ -270,17 +270,24 @@ The functions accept logits or predicted labels. Multi-hot all-zero group target
 
 ## 4. Model training
 
-`04_train_tic_detection.py` trains one fold at a time. Its main configuration is near the top of the file:
+`04_train_tic_detection.py` trains one fold at a time. The model, split strategy,
+and input features can be selected from the command line. For example:
 
-```python
-MODEL_NAME = "TDNN"          # TDNN, ResNet34, or TCNN
-SPLIT_BY = "session"         # participant, session, or file
-FEAT_NAME = "MFCC"           # Spectrogram, MelSpectrogram, or MFCC
-GLOBAL_NAME = f"{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}"
-K_FOLDS = 5
+```bash
+python 04_train_tic_detection.py --fold 1 \
+    --model-name TDNN --split-by session --feat-name MFCC
 ```
 
-The current defaults use 40-dimensional MFCCs computed from 80 mel bins, 10-second windows, a 50/50 tic/non-tic sampling probability, batch size 16, Adam with learning rate `0.001`, and 10 epochs. Multi-group tic samples are used for training and validation but excluded from test sampling.
+The accepted models are `TDNN`, `ResNet34`, and `TCNN`; split strategies are
+`participant`, `session`, and `file`; and features are `Spectrogram`,
+`MelSpectrogram`, and `MFCC`. The existing constants remain the command-line
+defaults. The global experiment name is built as
+`{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}` from the selected arguments.
+
+The current defaults use 40-dimensional MFCCs computed from 80 mel bins,
+10-second windows, a 50/50 tic/non-tic sampling probability, batch size 64,
+Adam with learning rate `0.0005`, and 10 epochs. Multi-group tic samples are
+used for training and excluded from validation and test sampling.
 
 Generate a new split definition and run a fold with:
 
