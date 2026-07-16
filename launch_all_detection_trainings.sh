@@ -1,0 +1,1 @@
+for f in 1 2 3 4 5;do python 04_train_tic_detection.py --fold "$f"; done
