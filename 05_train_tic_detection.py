@@ -1,4 +1,4 @@
-"""Train and evaluate a TDNN for tic detection and group classification."""
+"""Train and evaluate a model for tic detection and group classification."""
 
 import math
 from pathlib import Path
@@ -9,7 +9,7 @@ from torch import nn
 
 from bin.detection_datasets import SpecDataset, WavLmDataset
 from bin.detection_metrics import get_group_metrics, get_tic_metrics
-from bin.detection_models import ResNet34, TCNN, TDNN
+from bin.detection_models import CNN, ResNet34, TCNN, TDNN
 from bin.training_functions import (
     append_log,
     initialize_log,
@@ -40,6 +40,7 @@ MODEL_CLASSES = {
     "TDNN": TDNN,
     "ResNet34": ResNet34,
     "TCNN": TCNN,
+    "CNN": CNN,
 }
 LOG_FIELDS = [
     "fold",

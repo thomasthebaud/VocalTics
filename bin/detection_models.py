@@ -213,3 +213,25 @@ class TCNN(nn.Module):
         x = _statistics_pooling(x)
         x = self.segment_layer(x)
         return self.presence_classifier(x), self.group_classifier(x)
+
+
+class CNN(nn.Module):
+    """Three-layer CNN for tic presence and group classification."""
+
+    def __init__(self, input_dim, num_groups):
+        super().__init__()
+        self.input_dim = input_dim
+        self.conv_layers = nn.Sequential(
+            _ConvBlock(input_dim, 128, kernel_size=5),
+            _ConvBlock(128, 256, kernel_size=3),
+            _ConvBlock(256, 256, kernel_size=3),
+        )
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+        self.presence_classifier = nn.Linear(256, 2)
+        self.group_classifier = nn.Linear(256, num_groups)
+
+    def forward(self, x):
+        x = _prepare_input(x, self.input_dim)
+        x = self.conv_layers(x)
+        x = self.max_pool(x).squeeze(-1)
+        return self.presence_classifier(x), self.group_classifier(x)

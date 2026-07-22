@@ -4,6 +4,7 @@ from pathlib import Path
 
 import torch
 
+from bin.detection_models import CNN as DetectionCNN
 from bin.detection_models import ResNet34, TCNN, TDNN
 from bin.segmentation_models import BiLSTM, CNN, CNN_BiLSTM
 
@@ -17,6 +18,7 @@ MODEL_CLASSES = {
         "TDNN": TDNN,
         "ResNet34": ResNet34,
         "TCNN": TCNN,
+        "CNN": DetectionCNN,
     },
     "Segmentation": {
         "BiLSTM": BiLSTM,
@@ -29,6 +31,7 @@ INPUT_WEIGHT_KEYS = {
         "TDNN": "frame_layers.0.block.0.weight",
         "ResNet34": "stem.0.weight",
         "TCNN": "input_layer.block.0.weight",
+        "CNN": "conv_layers.0.block.0.weight",
     },
     "Segmentation": {
         "BiLSTM": "recurrent_layers.weight_ih_l0",

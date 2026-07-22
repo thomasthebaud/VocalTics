@@ -290,7 +290,9 @@ never overwrite it.
 
 - `TDNN`: time-delay convolution layers followed by statistics pooling;
 - `ResNet34`: a one-dimensional temporal ResNet-34; and
-- `TCNN`: a dilated temporal convolutional network.
+- `TCNN`: a dilated temporal convolutional network; and
+- `CNN`: three temporal convolution layers followed by adaptive max pooling
+  and separate linear tic-presence and tic-group heads.
 
 All models are initialized with an input feature dimension and number of tic groups:
 
@@ -358,8 +360,8 @@ python 05_train_tic_detection.py --fold 1 \
     --model-name TDNN --split-by session --feat-name MFCC
 ```
 
-The accepted models are `TDNN`, `ResNet34`, and `TCNN`; split strategies are
-`participant`, `session`, and `file`; and features are `Spectrogram`,
+The accepted models are `TDNN`, `ResNet34`, `TCNN`, and `CNN`; split strategies
+are `participant`, `session`, and `file`; and features are `Spectrogram`,
 `MelSpectrogram`, `MFCC`, and `WavLM`. The existing constants remain the
 command-line defaults. The global experiment name is built as
 `{MODEL_NAME}_{FEAT_NAME}_by{SPLIT_BY}` from the selected arguments.
