@@ -75,9 +75,11 @@ def load_test_predictions(experiment_dir):
 
 
 def ranked_samples(predictions):
-    """Return sample keys sorted from highest to lowest frame F1."""
+    """Rank tic-positive sample keys from highest to lowest frame F1."""
     samples = []
     for key, rows in predictions.groupby(["fold", "segment_id"], sort=False):
+        if not boolean_values(rows["tic_real"]).any():
+            continue
         samples.append((key, frame_f1(rows)))
     return sorted(samples, key=lambda item: item[1], reverse=True)
 
@@ -86,7 +88,8 @@ def select_deciles(samples, generator):
     """Randomly choose one sample from each F1-ranked decile."""
     if len(samples) < 10:
         raise ValueError(
-            f"At least 10 test samples are required, found {len(samples)}"
+            "At least 10 test samples containing a tic are required, "
+            f"found {len(samples)}"
         )
     deciles = np.array_split(np.arange(len(samples)), 10)
     return [

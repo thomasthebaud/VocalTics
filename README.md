@@ -597,10 +597,10 @@ python 12_prediction_sample.py
 ```
 
 For every experiment under `outputs/segmentation/`, the script combines test
-samples from all folds and calculates a frame-level F1 score for each sample.
-It sorts samples from highest to lowest F1, divides the ranked list into ten
-deciles, and randomly selects one sample from each decile using a fixed random
-seed.
+samples from all folds and keeps only samples containing at least one real tic
+frame. It calculates a frame-level F1 score for each retained sample, sorts
+them from highest to lowest F1, divides the ranked list into ten deciles, and
+randomly selects one sample from each decile using a fixed random seed.
 
 Each figure contains three aligned rows:
 
