@@ -83,9 +83,15 @@ def evaluate(
     segment_count = 0
     all_logits = []
     all_targets = []
+    all_info = []
 
     with torch.inference_mode():
-        for features, targets in loader:
+        for batch in loader:
+            if len(batch) == 3:
+                features, targets, batch_info = batch
+            else:
+                features, targets = batch
+                batch_info = None
             features = features.to(device)
             targets = targets.float().to(device)
             logits = model(features)
@@ -95,6 +101,25 @@ def evaluate(
             segment_count += batch_size
             all_logits.append(logits.cpu())
             all_targets.append(targets.bool().cpu())
+            if return_predictions and batch_info is not None:
+                for index in range(batch_size):
+                    all_info.append(
+                        {
+                            "AudioPath": batch_info["AudioPath"][index],
+                            "WindowStart": float(
+                                batch_info["WindowStart"][index].item()
+                            ),
+                            "WindowDuration": float(
+                                batch_info["WindowDuration"][index].item()
+                            ),
+                            "AudioDuration": float(
+                                batch_info["AudioDuration"][index].item()
+                            ),
+                            "embedding_path": batch_info["embedding_path"][
+                                index
+                            ],
+                        }
+                    )
 
     logits = torch.cat(all_logits)
     targets = torch.cat(all_targets)
@@ -118,12 +143,15 @@ def evaluate(
     prediction_table = None
     if return_predictions:
         prediction_table = make_prediction_table(
-            logits, targets, N_percent=SEGMENT_N_PERCENT
+            logits,
+            targets,
+            N_percent=SEGMENT_N_PERCENT,
+            segment_info=all_info,
         )
     return metrics, prediction_table
 
 
-def make_prediction_table(logits, targets, N_percent=5):
+def make_prediction_table(logits, targets, N_percent=5, segment_info=None):
     """Create one output row per frame, retaining its segment membership."""
     if not 0 <= N_percent <= 100:
         raise ValueError("N_percent must be between 0 and 100")
@@ -132,20 +160,45 @@ def make_prediction_table(logits, targets, N_percent=5):
     num_segments, num_frames = targets.shape
     segment_real = targets.any(dim=1)
     segment_pred = predictions.float().mean(dim=1) > N_percent / 100
-    return pd.DataFrame(
-        {
-            "segment_id": torch.arange(num_segments)
-            .repeat_interleave(num_frames)
-            .numpy(),
-            "frame_id": torch.arange(num_frames).repeat(num_segments).numpy(),
-            "tic_real": targets.reshape(-1).numpy(),
-            "tic_pred": predictions.reshape(-1).numpy(),
-            "tic_probability": probabilities.reshape(-1).numpy(),
-            "segment_real": segment_real.repeat_interleave(num_frames).numpy(),
-            "segment_pred": segment_pred.repeat_interleave(num_frames).numpy(),
-            "segment_n_percent": N_percent,
-        }
-    )
+    columns = {
+        "segment_id": torch.arange(num_segments)
+        .repeat_interleave(num_frames)
+        .numpy(),
+        "frame_id": torch.arange(num_frames).repeat(num_segments).numpy(),
+        "tic_real": targets.reshape(-1).numpy(),
+        "tic_pred": predictions.reshape(-1).numpy(),
+        "tic_probability": probabilities.reshape(-1).numpy(),
+        "segment_real": segment_real.repeat_interleave(num_frames).numpy(),
+        "segment_pred": segment_pred.repeat_interleave(num_frames).numpy(),
+        "segment_n_percent": N_percent,
+    }
+    if segment_info:
+        if len(segment_info) != num_segments:
+            raise ValueError("Segment provenance does not match predictions")
+        columns["AudioPath"] = [
+            info["AudioPath"] for info in segment_info for _ in range(num_frames)
+        ]
+        columns["WindowStart"] = [
+            info["WindowStart"]
+            for info in segment_info
+            for _ in range(num_frames)
+        ]
+        columns["WindowDuration"] = [
+            info["WindowDuration"]
+            for info in segment_info
+            for _ in range(num_frames)
+        ]
+        columns["AudioDuration"] = [
+            info["AudioDuration"]
+            for info in segment_info
+            for _ in range(num_frames)
+        ]
+        columns["embedding_path"] = [
+            info["embedding_path"]
+            for info in segment_info
+            for _ in range(num_frames)
+        ]
+    return pd.DataFrame(columns)
 
 
 def main():
@@ -191,6 +244,7 @@ def main():
         fold["val"],
         win_len=WIN_LEN,
         p_tics=P_TICS,
+        return_info=True,
         **dataset_kwargs,
     )
     print("Test ", end="")
@@ -199,6 +253,7 @@ def main():
         fold["test"],
         win_len=WIN_LEN,
         p_tics=P_TICS,
+        return_info=True,
         **dataset_kwargs,
     )
 

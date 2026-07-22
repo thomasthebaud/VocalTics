@@ -16,7 +16,8 @@ Run the numbered scripts in this order:
 8. `07_training_graphs.py` plots training curves across folds.
 9. `08_networks_weights.py` reports fold-1 model parameter counts.
 10. `10_metrics.py` aggregates detection and segmentation metrics across folds.
-11. `11_make_graphs.py` creates confusion matrices from saved predictions.
+11. `11_confusion_matrices.py` creates confusion matrices from saved predictions.
+12. `12_prediction_sample.py` plots representative segmentation samples by F1 decile.
 
 ## Expected data layout
 
@@ -487,7 +488,9 @@ outputs/segmentation/{GLOBAL_NAME}/
 Prediction CSV files contain one row per feature frame, including its segment
 ID, frame truth/prediction/probability, and the reduced segment truth and
 prediction. They also store `segment_n_percent=5`, the fixed threshold used by
-the training-time evaluation.
+the training-time evaluation. To make exact sample reconstruction possible,
+the files retain the sampled audio path, window start and duration, recording
+duration, and WavLM embedding path.
 
 Both training scripts use `bin/training_functions.py` for their common command
 line arguments, feature transforms, saved-fold loading, DataLoader creation,
@@ -560,7 +563,7 @@ threshold.
 Run:
 
 ```bash
-python 11_make_graphs.py
+python 11_confusion_matrices.py
 ```
 
 The script discovers every experiment folder under `outputs/detection/` and
@@ -585,6 +588,36 @@ graphs/detection/{GLOBAL_NAME}/confusion_matrices.png
 graphs/segmentation/{GLOBAL_NAME}/confusion_matrices.png
 ```
 
+## 12. Prediction samples by F1 decile
+
+Run:
+
+```bash
+python 12_prediction_sample.py
+```
+
+For every experiment under `outputs/segmentation/`, the script combines test
+samples from all folds and calculates a frame-level F1 score for each sample.
+It sorts samples from highest to lowest F1, divides the ranked list into ten
+deciles, and randomly selects one sample from each decile using a fixed random
+seed.
+
+Each figure contains three aligned rows:
+
+1. the sampled waveform, with transparent red regions marking real tic frames;
+2. the exact MFCC, spectrogram, mel-spectrogram, or WavLM feature window; and
+3. the predicted tic probability for every frame.
+
+Figures are saved as:
+
+```text
+graphs/samples/{GLOBAL_NAME}/decile_{1..10}.png
+```
+
+The script needs the sample-provenance columns added by the current version of
+script 06. If older prediction CSVs do not contain these columns, rerun the
+corresponding segmentation folds before running script 12.
+
 ## Repository structure
 
 ```text
@@ -598,7 +631,8 @@ graphs/segmentation/{GLOBAL_NAME}/confusion_matrices.png
 ├── 07_training_graphs.py
 ├── 08_networks_weights.py
 ├── 10_metrics.py
-├── 11_make_graphs.py
+├── 11_confusion_matrices.py
+├── 12_prediction_sample.py
 ├── Master Tic Record.xlsx
 ├── README.md
 ├── launch_detection_trainings_MFCC.sh

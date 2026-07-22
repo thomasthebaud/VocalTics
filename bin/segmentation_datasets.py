@@ -23,7 +23,9 @@ class Segmentation_Dataset(Detection_Dataset):
         win_len=10,
         p_tics=0.2,
         include_multigroup=True,
+        return_info=False,
     ):
+        self.return_info = return_info
         super().__init__(
             metadata_file,
             participant_phase_sessions,
@@ -33,7 +35,7 @@ class Segmentation_Dataset(Detection_Dataset):
         )
 
     def __getitem__(self, index):
-        """Return features and boolean tic-presence labels over feature time."""
+        """Return features, frame labels, and optional sample provenance."""
         self._validate_index(index)
         row, window_start, _, _, _ = self._sample_window()
         features = self._load_features(row, window_start)
@@ -42,7 +44,19 @@ class Segmentation_Dataset(Detection_Dataset):
             window_start=window_start,
             num_frames=features.shape[-1],
         )
-        return features, labels
+        if not self.return_info:
+            return features, labels
+        embedding_path = row.get("embedding_path", "")
+        if pd.isna(embedding_path):
+            embedding_path = ""
+        info = {
+            "AudioPath": str(row["AudioPath"]),
+            "WindowStart": float(window_start),
+            "WindowDuration": self.win_len,
+            "AudioDuration": self.audio_durations[row["AudioPath"]],
+            "embedding_path": str(embedding_path),
+        }
+        return features, labels, info
 
     def _frame_labels(self, audio_path, window_start, num_frames):
         """Mark frames covered by any tic annotation in the sampled window."""
@@ -77,6 +91,7 @@ class SpecDataset(Segmentation_Dataset):
         win_len=10,
         p_tics=0.2,
         include_multigroup=True,
+        return_info=False,
     ):
         if not isinstance(transform, SUPPORTED_TRANSFORMS):
             raise TypeError(
@@ -90,6 +105,7 @@ class SpecDataset(Segmentation_Dataset):
             win_len,
             p_tics,
             include_multigroup,
+            return_info,
         )
 
     def _load_features(self, row, window_start):
@@ -110,6 +126,7 @@ class WavLmDataset(Segmentation_Dataset):
         p_tics=0.2,
         include_multigroup=True,
         frames_per_second=50,
+        return_info=False,
     ):
         if frames_per_second <= 0:
             raise ValueError("frames_per_second must be greater than zero")
@@ -120,6 +137,7 @@ class WavLmDataset(Segmentation_Dataset):
             win_len,
             p_tics,
             include_multigroup,
+            return_info,
         )
         if "embedding_path" not in self.metadata.columns:
             raise ValueError("WavLM metadata must contain an embedding_path column")
