@@ -7,7 +7,10 @@ import torch
 
 from bin.detection_metrics import get_group_metrics, get_tic_metrics
 from bin.make_splits import load_split
-from bin.segmentation_metrics import get_segmentation_metrics
+from bin.segmentation_metrics import (
+    find_best_segment_percent,
+    get_segmentation_metrics,
+)
 
 
 OUTPUT_ROOTS = {
@@ -204,8 +207,8 @@ def load_segmentation_predictions(csv_path):
     return predictions
 
 
-def segmentation_fold_metrics(predictions):
-    """Calculate frame and segment metrics while preserving segment boundaries."""
+def segmentation_tensors(predictions):
+    """Reconstruct frame tensors while preserving segment boundaries."""
     score_rows = []
     target_rows = []
     lengths = set()
@@ -222,18 +225,15 @@ def segmentation_fold_metrics(predictions):
         raise ValueError("No segmentation predictions were provided")
     if len(lengths) != 1:
         raise ValueError("Segmentation samples do not have equal frame lengths")
-    scores = torch.stack(score_rows)
-    targets = torch.stack(target_rows)
-    return get_segmentation_metrics(scores, targets, from_logits=False)
+    return torch.stack(score_rows), torch.stack(target_rows)
 
 
-def collect_segmentation_metrics(experiment_dir, split_name):
-    """Calculate segmentation metrics for every available fold."""
-    rows = [
-        segmentation_fold_metrics(load_segmentation_predictions(csv_path))
-        for csv_path in prediction_paths(experiment_dir, split_name)
-    ]
-    return pd.DataFrame(rows, columns=SEGMENTATION_METRICS)
+def segmentation_fold_metrics(predictions, N_percent):
+    """Calculate one fold's metrics using the supplied segment percentage."""
+    scores, targets = segmentation_tensors(predictions)
+    return get_segmentation_metrics(
+        scores, targets, from_logits=False, N_percent=N_percent
+    )
 
 
 def formatted_summary(metrics, metric_names):
@@ -293,17 +293,57 @@ def detection_table(experiment_dir, folds, metadata):
 
 
 def segmentation_table(experiment_dir):
-    """Return validation and test segmentation metrics across folds."""
-    results = {
-        "Validation": collect_segmentation_metrics(experiment_dir, "val"),
-        "Test": collect_segmentation_metrics(experiment_dir, "test"),
+    """Tune each fold on validation and apply its percentage to test."""
+    validation_paths = {
+        fold_number(path): path for path in prediction_paths(experiment_dir, "val")
     }
-    return pd.DataFrame(
+    test_paths = {
+        fold_number(path): path for path in prediction_paths(experiment_dir, "test")
+    }
+    if validation_paths.keys() != test_paths.keys():
+        raise ValueError("Validation and test prediction folds do not match")
+
+    validation_rows = []
+    test_rows = []
+    selected_percentages = {}
+    for number in sorted(validation_paths):
+        validation_predictions = load_segmentation_predictions(
+            validation_paths[number]
+        )
+        validation_scores, validation_targets = segmentation_tensors(
+            validation_predictions
+        )
+        N_percent = find_best_segment_percent(
+            validation_scores, validation_targets, from_logits=False
+        )
+        selected_percentages[number] = N_percent
+        validation_rows.append(
+            get_segmentation_metrics(
+                validation_scores,
+                validation_targets,
+                from_logits=False,
+                N_percent=N_percent,
+            )
+        )
+        test_rows.append(
+            segmentation_fold_metrics(
+                load_segmentation_predictions(test_paths[number]), N_percent
+            )
+        )
+
+    results = {
+        "Validation": pd.DataFrame(
+            validation_rows, columns=SEGMENTATION_METRICS
+        ),
+        "Test": pd.DataFrame(test_rows, columns=SEGMENTATION_METRICS),
+    }
+    table = pd.DataFrame(
         {
             column: formatted_summary(metrics, SEGMENTATION_METRICS)
             for column, metrics in results.items()
         }
     )
+    return table, selected_percentages
 
 
 def main():
@@ -325,11 +365,17 @@ def main():
                     metadata["Sess"] = metadata["Sess"].astype(int)
                 table = detection_table(experiment_dir, folds, metadata)
             else:
-                table = segmentation_table(experiment_dir)
+                table, selected_percentages = segmentation_table(experiment_dir)
         except (FileNotFoundError, ValueError) as error:
             print(f"\nSkipped {task}/{global_name}: {error}")
             continue
         print(f"\n{task.title()} metrics: {global_name}\n")
+        if task == "segmentation":
+            percentages = ", ".join(
+                f"fold {fold}: {percent}%"
+                for fold, percent in selected_percentages.items()
+            )
+            print(f"Validation-selected segment thresholds: {percentages}\n")
         print(table.to_string())
 
 

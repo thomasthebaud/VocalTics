@@ -346,9 +346,18 @@ frame_accuracy, frame_f1, frame_auroc, segment_accuracy, segment_f1 = (
 ```
 
 Frame-wise metrics treat each frame as one prediction. Segment-wise metrics
-treat the first dimension as the batch of segments: a segment is positive when
-at least one of its frames is positive. Floating-point inputs are treated as
-logits by default; pass `from_logits=False` for probabilities.
+treat the first dimension as the batch of segments. By default, a prediction is
+positive when more than 5% of its frames are predicted as tics, while a real
+segment is positive when it contains any annotated tic frame. Change the
+prediction threshold with `N_percent`; for example,
+`get_segmentation_metrics(logits, targets, N_percent=10)`. Floating-point
+inputs are treated as logits by default; pass `from_logits=False` for
+probabilities.
+
+Passing `N_percent=-1` directly to the metric function searches integer
+percentages from 0 through 100 and uses the value with the highest segment F1
+on the supplied predictions. Cross-validation threshold selection is handled
+by script 10 as described below.
 
 ## 5. Detection training
 
@@ -462,6 +471,8 @@ and the embedding metadata created by script 03. Both use `p_tics=0.2` and
 `BCEWithLogitsLoss`. Each epoch logs frame accuracy, frame F1, frame AUROC,
 segment accuracy, and segment F1.
 The checkpoint with the lowest validation loss is saved as `best.pt`.
+Final validation and test metrics produced during training use a fixed 5%
+segment threshold.
 Models, logs, and validation/test prediction tables are written under:
 
 ```text
@@ -532,7 +543,10 @@ metrics.
 
 For segmentation experiments, it reconstructs each segment from its frame
 rows and reports validation and test frame accuracy, frame F1, frame AUROC,
-segment accuracy, and segment F1.
+segment accuracy, and segment F1. For each fold, it selects the integer segment
+percentage from 0 through 100 that maximizes validation segment F1, prints the
+selected percentage, and applies that same percentage to both validation and
+test metrics. The test outputs are never used to select the threshold.
 
 ## 11. Confusion matrices
 

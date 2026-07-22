@@ -36,6 +36,7 @@ LEARNING_RATE = 0.0001
 NUM_WORKERS = 0
 WIN_LEN = 10
 P_TICS = 0.2
+SEGMENT_N_PERCENT = 5
 WAVLM_INPUT_DIM = 768
 
 MODEL_CLASSES = {
@@ -69,7 +70,13 @@ def train_one_epoch(model, loader, optimizer, loss_function, device):
         optimizer.step()
 
 
-def evaluate(model, loader, loss_function, device, return_predictions=False):
+def evaluate(
+    model,
+    loader,
+    loss_function,
+    device,
+    return_predictions=False,
+):
     """Evaluate one split and return metrics plus frame predictions."""
     model.eval()
     total_loss = 0.0
@@ -97,7 +104,9 @@ def evaluate(model, loader, loss_function, device, return_predictions=False):
         frame_auroc,
         segment_accuracy,
         segment_f1,
-    ) = get_segmentation_metrics(logits, targets)
+    ) = get_segmentation_metrics(
+        logits, targets, N_percent=SEGMENT_N_PERCENT
+    )
     metrics = {
         "loss": total_loss / segment_count,
         "frame_accuracy": frame_accuracy,
@@ -108,17 +117,21 @@ def evaluate(model, loader, loss_function, device, return_predictions=False):
     }
     prediction_table = None
     if return_predictions:
-        prediction_table = make_prediction_table(logits, targets)
+        prediction_table = make_prediction_table(
+            logits, targets, N_percent=SEGMENT_N_PERCENT
+        )
     return metrics, prediction_table
 
 
-def make_prediction_table(logits, targets):
+def make_prediction_table(logits, targets, N_percent=5):
     """Create one output row per frame, retaining its segment membership."""
+    if not 0 <= N_percent <= 100:
+        raise ValueError("N_percent must be between 0 and 100")
     probabilities = logits.sigmoid()
     predictions = probabilities >= 0.5
     num_segments, num_frames = targets.shape
     segment_real = targets.any(dim=1)
-    segment_pred = predictions.any(dim=1)
+    segment_pred = predictions.float().mean(dim=1) > N_percent / 100
     return pd.DataFrame(
         {
             "segment_id": torch.arange(num_segments)
@@ -130,6 +143,7 @@ def make_prediction_table(logits, targets):
             "tic_probability": probabilities.reshape(-1).numpy(),
             "segment_real": segment_real.repeat_interleave(num_frames).numpy(),
             "segment_pred": segment_pred.repeat_interleave(num_frames).numpy(),
+            "segment_n_percent": N_percent,
         }
     )
 
@@ -230,6 +244,7 @@ def main():
             "fold": args.fold,
             "val_loss": val_metrics["loss"],
             "val_frame_auroc": val_metrics["frame_auroc"],
+            "segment_n_percent": SEGMENT_N_PERCENT,
         }
         torch.save(checkpoint, fold_model_dir / f"{epoch}.pt")
 
@@ -249,13 +264,24 @@ def main():
     best_checkpoint = torch.load(best_path, map_location=device)
     model.load_state_dict(best_checkpoint["model_state_dict"])
     val_metrics, val_predictions = evaluate(
-        model, val_loader, loss_function, device, return_predictions=True
+        model,
+        val_loader,
+        loss_function,
+        device,
+        return_predictions=True,
     )
     print(f"\nBest epoch: {best_checkpoint['epoch']}")
+    print(
+        f"Segment threshold: > {SEGMENT_N_PERCENT}% predicted tic frames"
+    )
     print_metrics("best val", val_metrics)
 
     test_metrics, test_predictions = evaluate(
-        model, test_loader, loss_function, device, return_predictions=True
+        model,
+        test_loader,
+        loss_function,
+        device,
+        return_predictions=True,
     )
     print("\nTest results")
     print_metrics("test", test_metrics)
