@@ -478,27 +478,46 @@ segmentation-specific losses and evaluation remain in their respective scripts.
 
 ## 7. Training curves
 
-After all folds have been trained, configure `GLOBAL_NAME` and `K_FOLDS` in `07_training_graphs.py`, then run:
+After training one or more experiments, run:
 
 ```bash
 python 07_training_graphs.py
 ```
 
-The script loads every structured fold log and uses Seaborn to plot mean train/validation loss and tic AUROC per epoch with a 95% confidence interval across folds. The figure is saved to:
+The script discovers every experiment directory under `models/detection/` and
+`models/segmentation/`, then loads every available `fold*.log`. It uses
+Seaborn to plot mean train/validation loss and AUROC per epoch with a 95%
+confidence interval across folds. Detection plots use tic AUROC and
+segmentation plots use frame AUROC. Figures are saved to:
 
 ```text
-graphs/training_curve/{GLOBAL_NAME}.png
+graphs/training_curve/{detection|segmentation}/{GLOBAL_NAME}.png
 ```
 
 ## 10. Metrics across folds
-
-Configure `K_FOLDS` in `10_metrics.py`, then run:
 
 ```bash
 python 10_metrics.py
 ```
 
-The script discovers every experiment folder under `outputs/detection/`, then loads every validation and test prediction table and calculates metrics separately for each fold. It prints one combined table per experiment whose columns cover validation/test results for all, seen, and unseen tic types. Every cell is formatted as `mean (±std)` across contributing folds. It uses `splits.json` and the source metadata to identify types present or absent in each fold's training split. A combined TicID is considered seen only when all of its component types occur in training. Non-tic rows are included in both subsets so binary tic-detection metrics remain defined. Rows whose real or predicted group contains `+` are excluded from group metrics but remain part of tic-detection metrics.
+The script discovers every experiment folder under both `outputs/detection/`
+and `outputs/segmentation/`. It automatically uses every available
+`fold*_val.csv` and `fold*_test.csv`, so the fold count does not need to be
+configured in the script. Every result is formatted as `mean (±std)` across
+the contributing folds.
+
+For detection experiments, it prints one table whose columns cover validation
+and test results for all, seen, and unseen tic types. It uses `splits.json` and
+the source metadata to identify types present or absent in each fold's training
+split. A combined TicID is considered seen only when all of its component types
+occur in training. Non-tic rows are included in both subsets so binary
+tic-detection metrics remain defined. Rows whose real or predicted group
+contains `+` are excluded from group metrics but remain part of tic-detection
+metrics.
+
+For segmentation experiments, it reconstructs each segment from its frame
+rows and reports validation and test frame accuracy, frame F1, frame AUROC,
+segment accuracy, and segment F1.
 
 ## 11. Confusion matrices
 
@@ -508,15 +527,26 @@ Run:
 python 11_make_graphs.py
 ```
 
-The script discovers every experiment folder under `outputs/detection/` and calls `bin.graphs.confusion_matrix.make_confusion_matrix(input_path, output_path)`. The reusable helper accepts any experiment directory containing `fold*_test.csv` and `fold*_val.csv`, so it can also be used with future paths such as `outputs/segmentation/{GLOBAL_NAME}`. For each experiment, it combines test and validation predictions across folds and draws four confusion matrices:
+The script discovers every experiment folder under `outputs/detection/` and
+`outputs/segmentation/`, then calls the reusable
+`bin.graphs.confusion_matrix.make_confusion_matrix()` helper with the relevant
+task. It combines all available validation and test prediction files across
+folds.
+
+For each detection experiment, it draws four confusion matrices:
 
 - test and validation tic-versus-no-tic matrices, annotated with sample counts and percentages normalized within each real-label row; and
 - test and validation tic-group matrices after excluding rows whose real or predicted group is `-1` or contains `+`. Zero cells remain white, while every positive count is colored using a logarithmic scale.
 
-The figure is saved to:
+For each segmentation experiment, it draws test and validation matrices at
+both the frame and segment levels. These binary matrices show sample counts and
+row-normalized percentages.
+
+Figures are saved to:
 
 ```text
-graphs/{GLOBAL_NAME}/confusion_matrices.png
+graphs/detection/{GLOBAL_NAME}/confusion_matrices.png
+graphs/segmentation/{GLOBAL_NAME}/confusion_matrices.png
 ```
 
 ## Repository structure
@@ -561,5 +591,7 @@ Generated files are not required to live in the repository. With the default con
 splits.json
 models/detection/TDNN_MFCC_bysession/
 outputs/detection/TDNN_MFCC_bysession/
-graphs/TDNN_MFCC_bysession/confusion_matrices.png
+outputs/segmentation/BiLSTM_MFCC_bysession/
+graphs/detection/TDNN_MFCC_bysession/confusion_matrices.png
+graphs/segmentation/BiLSTM_MFCC_bysession/confusion_matrices.png
 ```

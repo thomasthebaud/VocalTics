@@ -22,19 +22,5 @@ the number and duration of the recordings.
 
 The approximate training time is:
 
-```text
-number of models × number of folds × approximately 1 hour
-```
+number of models (3) × number of folds (5) × (1h for Spectral features/3h for WavLM features)
 
-With five folds:
-
-| Workload | Expected time |
-|---|---:|
-| One model across 5 folds | ≈ 5 hours |
-| Two models across 5 folds | ≈ 10 hours |
-| Three models across 5 folds | ≈ 15 hours |
-
-Therefore, a launcher or sequence of launchers covering two to three model
-configurations should take approximately **10–15 hours** when folds run
-sequentially. The current launcher scripts process their folds one after
-another rather than in parallel.

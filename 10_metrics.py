@@ -1,20 +1,23 @@
-"""Aggregate validation and test metrics across cross-validation folds."""
+"""Aggregate detection and segmentation metrics across folds."""
 
 from pathlib import Path
 
 import pandas as pd
 import torch
 
-from bin.make_splits import load_split
 from bin.detection_metrics import get_group_metrics, get_tic_metrics
+from bin.make_splits import load_split
+from bin.segmentation_metrics import get_segmentation_metrics
 
 
-K_FOLDS = 5
-OUTPUT_ROOT = Path("outputs/detection")
+OUTPUT_ROOTS = {
+    "detection": Path("outputs/detection"),
+    "segmentation": Path("outputs/segmentation"),
+}
 METADATA_PATH = Path("/projects/vocaltics/data/metadata.csv")
 SPLIT_PATH = Path("splits.json")
 
-METRIC_NAMES = [
+DETECTION_METRICS = [
     "Tic accuracy",
     "Tic F1",
     "Tic AUROC",
@@ -22,6 +25,13 @@ METRIC_NAMES = [
     "Tic recall",
     "Group accuracy",
     "Group macro F1",
+]
+SEGMENTATION_METRICS = [
+    "Frame accuracy",
+    "Frame F1",
+    "Frame AUROC",
+    "Segment accuracy",
+    "Segment F1",
 ]
 
 
@@ -53,32 +63,64 @@ def group_values(group_real, group_pred):
                     targets[row, group_to_index[group]] = 1
         return targets
 
-    real_tensor = encode(real)
-    predicted_tensor = encode(predicted)
-    return predicted_tensor, real_tensor
+    return encode(predicted), encode(real)
 
 
-def load_predictions(csv_path):
-    """Load and validate one fold prediction table."""
+def discover_experiments():
+    """Return all experiment directories under both output roots."""
+    experiments = []
+    for task, root in OUTPUT_ROOTS.items():
+        if not root.exists():
+            continue
+        experiments.extend(
+            (task, path.name, path)
+            for path in sorted(root.iterdir())
+            if path.is_dir()
+        )
+    if not experiments:
+        roots = ", ".join(str(root) for root in OUTPUT_ROOTS.values())
+        raise FileNotFoundError(f"No experiment directories found under {roots}")
+    return experiments
+
+
+def prediction_paths(experiment_dir, split_name):
+    """Return every available fold prediction CSV for one split."""
+    paths = sorted(experiment_dir.glob(f"fold*_{split_name}.csv"))
+    if not paths:
+        raise FileNotFoundError(
+            f"No fold*_{split_name}.csv files found in {experiment_dir}"
+        )
+    return paths
+
+
+def fold_number(csv_path):
+    """Extract the integer fold number from foldN_split.csv."""
+    try:
+        return int(csv_path.stem[4:].split("_")[0])
+    except ValueError as error:
+        raise ValueError(f"Cannot read fold number from {csv_path}") from error
+
+
+def load_detection_predictions(csv_path):
+    """Load and validate one detection prediction table."""
     predictions = pd.read_csv(
         csv_path, dtype={"tic_type": str, "tic_group": str, "group_pred": str}
     )
-    required_columns = {
+    required = {
         "tic_real",
         "tic_probability",
         "tic_type",
         "tic_group",
         "group_pred",
     }
-    missing = required_columns - set(predictions.columns)
+    missing = required - set(predictions.columns)
     if missing:
         raise ValueError(f"Missing columns in {csv_path}: {sorted(missing)}")
     return predictions
 
 
-def load_fold_metrics(predictions):
-    """Calculate all metrics from one fold prediction table."""
-
+def detection_fold_metrics(predictions):
+    """Calculate detection and tic-group metrics for one fold."""
     tic_real = boolean_values(predictions["tic_real"])
     tic_scores = torch.tensor(
         predictions["tic_probability"].to_numpy(), dtype=torch.float32
@@ -100,7 +142,7 @@ def load_fold_metrics(predictions):
 
 
 def training_tic_types(metadata, recordings):
-    """Return the individual TicIDs available in one fold's training split."""
+    """Return the individual TicIDs available in one training split."""
     recording_set = set(recordings)
     selected = metadata.apply(
         lambda row: (row["ID"], row["Phase"], row["Sess"]) in recording_set,
@@ -131,46 +173,77 @@ def filter_by_training_presence(predictions, train_types, presence):
     return predictions.loc[selected].reset_index(drop=True)
 
 
-def get_global_names():
-    """Return all experiment directory names under outputs/detection."""
-    if not OUTPUT_ROOT.exists():
-        raise FileNotFoundError(f"Missing output directory: {OUTPUT_ROOT}")
-    names = sorted(path.name for path in OUTPUT_ROOT.iterdir() if path.is_dir())
-    if not names:
-        raise ValueError(f"No experiment directories found in {OUTPUT_ROOT}")
-    return names
-
-
-def collect_metrics(
-    global_name, split_name, folds=None, metadata=None, presence=None
+def collect_detection_metrics(
+    experiment_dir, split_name, folds=None, metadata=None, presence=None
 ):
-    """Load one prediction table for each fold of a split."""
+    """Calculate detection metrics for every available fold."""
     rows = []
-    for fold in range(1, K_FOLDS + 1):
-        csv_path = OUTPUT_ROOT / global_name / f"fold{fold}_{split_name}.csv"
-        if not csv_path.exists():
-            raise FileNotFoundError(f"Missing prediction file: {csv_path}")
-        predictions = load_predictions(csv_path)
+    for csv_path in prediction_paths(experiment_dir, split_name):
+        predictions = load_detection_predictions(csv_path)
         if presence is not None:
-            train_types = training_tic_types(metadata, folds[fold]["train"])
+            number = fold_number(csv_path)
+            if number not in folds:
+                raise ValueError(f"Fold {number} is missing from {SPLIT_PATH}")
+            train_types = training_tic_types(metadata, folds[number]["train"])
             predictions = filter_by_training_presence(
                 predictions, train_types, presence
             )
             if predictions is None:
                 continue
-        rows.append(load_fold_metrics(predictions))
-    return pd.DataFrame(rows, columns=METRIC_NAMES)
+        rows.append(detection_fold_metrics(predictions))
+    return pd.DataFrame(rows, columns=DETECTION_METRICS)
 
 
-def formatted_summary(metrics):
-    """Return each metric as a 'mean (±std)' string across folds."""
+def load_segmentation_predictions(csv_path):
+    """Load and validate one frame-level segmentation prediction table."""
+    predictions = pd.read_csv(csv_path)
+    required = {"segment_id", "frame_id", "tic_real", "tic_probability"}
+    missing = required - set(predictions.columns)
+    if missing:
+        raise ValueError(f"Missing columns in {csv_path}: {sorted(missing)}")
+    return predictions
+
+
+def segmentation_fold_metrics(predictions):
+    """Calculate frame and segment metrics while preserving segment boundaries."""
+    score_rows = []
+    target_rows = []
+    lengths = set()
+    for _, segment in predictions.groupby("segment_id", sort=False):
+        segment = segment.sort_values("frame_id")
+        scores = torch.tensor(
+            segment["tic_probability"].to_numpy(), dtype=torch.float32
+        )
+        targets = boolean_values(segment["tic_real"])
+        score_rows.append(scores)
+        target_rows.append(targets)
+        lengths.add(len(segment))
+    if not score_rows:
+        raise ValueError("No segmentation predictions were provided")
+    if len(lengths) != 1:
+        raise ValueError("Segmentation samples do not have equal frame lengths")
+    scores = torch.stack(score_rows)
+    targets = torch.stack(target_rows)
+    return get_segmentation_metrics(scores, targets, from_logits=False)
+
+
+def collect_segmentation_metrics(experiment_dir, split_name):
+    """Calculate segmentation metrics for every available fold."""
+    rows = [
+        segmentation_fold_metrics(load_segmentation_predictions(csv_path))
+        for csv_path in prediction_paths(experiment_dir, split_name)
+    ]
+    return pd.DataFrame(rows, columns=SEGMENTATION_METRICS)
+
+
+def formatted_summary(metrics, metric_names):
+    """Return each metric as a mean (plus/minus std) string across folds."""
     if metrics.empty:
-        return pd.Series("N/A", index=METRIC_NAMES)
-
+        return pd.Series("N/A", index=metric_names)
     means = metrics.mean()
     standard_deviations = metrics.std(ddof=1)
     values = {}
-    for metric in METRIC_NAMES:
+    for metric in metric_names:
         mean = means[metric]
         deviation = standard_deviations[metric]
         if pd.isna(mean):
@@ -182,13 +255,8 @@ def formatted_summary(metrics):
     return pd.Series(values)
 
 
-def main():
-    folds = load_split(SPLIT_PATH)
-    metadata = pd.read_csv(METADATA_PATH, dtype={"Type": str})
-    metadata["ID"] = metadata["ID"].astype(str).str.upper()
-    metadata["Phase"] = metadata["Phase"].astype(str).str.upper()
-    metadata["Sess"] = metadata["Sess"].astype(int)
-
+def detection_table(experiment_dir, folds, metadata):
+    """Return the all/seen/unseen detection metrics table."""
     column_order = [
         "Validation - all",
         "Validation - seen",
@@ -197,35 +265,71 @@ def main():
         "Test - seen",
         "Test - unseen",
     ]
-    for global_name in get_global_names():
-        try:
-            results = {
-                "Validation - all": collect_metrics(global_name, "val"),
-                "Test - all": collect_metrics(global_name, "test"),
-            }
-        except:
-            print(f"Skipping {global_name} due to missing prediction files")
-            continue
-        for presence in ("seen", "unseen"):
-            results[f"Validation - {presence}"] = collect_metrics(
-                global_name,
-                "val",
-                folds=folds,
-                metadata=metadata,
-                presence=presence,
-            )
-            results[f"Test - {presence}"] = collect_metrics(
-                global_name,
-                "test",
-                folds=folds,
-                metadata=metadata,
-                presence=presence,
-            )
-
-        table = pd.DataFrame(
-            {column: formatted_summary(results[column]) for column in column_order}
+    results = {
+        "Validation - all": collect_detection_metrics(experiment_dir, "val"),
+        "Test - all": collect_detection_metrics(experiment_dir, "test"),
+    }
+    for presence in ("seen", "unseen"):
+        results[f"Validation - {presence}"] = collect_detection_metrics(
+            experiment_dir,
+            "val",
+            folds=folds,
+            metadata=metadata,
+            presence=presence,
         )
-        print(f"\nMetrics across {K_FOLDS} folds: {global_name}\n")
+        results[f"Test - {presence}"] = collect_detection_metrics(
+            experiment_dir,
+            "test",
+            folds=folds,
+            metadata=metadata,
+            presence=presence,
+        )
+    return pd.DataFrame(
+        {
+            column: formatted_summary(results[column], DETECTION_METRICS)
+            for column in column_order
+        }
+    )
+
+
+def segmentation_table(experiment_dir):
+    """Return validation and test segmentation metrics across folds."""
+    results = {
+        "Validation": collect_segmentation_metrics(experiment_dir, "val"),
+        "Test": collect_segmentation_metrics(experiment_dir, "test"),
+    }
+    return pd.DataFrame(
+        {
+            column: formatted_summary(metrics, SEGMENTATION_METRICS)
+            for column, metrics in results.items()
+        }
+    )
+
+
+def main():
+    experiments = discover_experiments()
+    folds = None
+    metadata = None
+
+    print(f"Found {len(experiments)} experiments")
+    for task, global_name, experiment_dir in experiments:
+        try:
+            if task == "detection":
+                if folds is None:
+                    folds = load_split(SPLIT_PATH)
+                    metadata = pd.read_csv(METADATA_PATH, dtype={"Type": str})
+                    metadata["ID"] = metadata["ID"].astype(str).str.upper()
+                    metadata["Phase"] = (
+                        metadata["Phase"].astype(str).str.upper()
+                    )
+                    metadata["Sess"] = metadata["Sess"].astype(int)
+                table = detection_table(experiment_dir, folds, metadata)
+            else:
+                table = segmentation_table(experiment_dir)
+        except (FileNotFoundError, ValueError) as error:
+            print(f"\nSkipped {task}/{global_name}: {error}")
+            continue
+        print(f"\n{task.title()} metrics: {global_name}\n")
         print(table.to_string())
 
 
