@@ -226,12 +226,11 @@ class CNN(nn.Module):
             _ConvBlock(128, 256, kernel_size=3),
             _ConvBlock(256, 256, kernel_size=3),
         )
-        self.max_pool = nn.AdaptiveMaxPool1d(1)
-        self.presence_classifier = nn.Linear(256, 2)
-        self.group_classifier = nn.Linear(256, num_groups)
+        self.presence_classifier = nn.Linear(512, 2)
+        self.group_classifier = nn.Linear(512, num_groups)
 
     def forward(self, x):
         x = _prepare_input(x, self.input_dim)
         x = self.conv_layers(x)
-        x = self.max_pool(x).squeeze(-1)
+        x = _statistics_pooling(x)
         return self.presence_classifier(x), self.group_classifier(x)

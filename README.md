@@ -14,8 +14,9 @@ Run the numbered scripts in this order:
 6. `06_train_tic_segmentation.py` trains one segmentation cross-validation fold.
 7. Run the relevant training script once for every fold.
 8. `07_training_graphs.py` plots training curves across folds.
-9. `10_metrics.py` aggregates validation and test detection metrics across folds.
-10. `11_make_graphs.py` creates confusion matrices from saved predictions.
+9. `08_networks_weights.py` reports fold-1 model parameter counts.
+10. `10_metrics.py` aggregates detection and segmentation metrics across folds.
+11. `11_make_graphs.py` creates confusion matrices from saved predictions.
 
 ## Expected data layout
 
@@ -286,12 +287,12 @@ never overwrite it.
 
 ## Models
 
-`bin/detection_models.py` contains three temporal architectures inspired by x-vector systems:
+`bin/detection_models.py` contains four temporal architectures:
 
 - `TDNN`: time-delay convolution layers followed by statistics pooling;
-- `ResNet34`: a one-dimensional temporal ResNet-34; and
+- `ResNet34`: a one-dimensional temporal ResNet-34;
 - `TCNN`: a dilated temporal convolutional network; and
-- `CNN`: three temporal convolution layers followed by adaptive max pooling
+- `CNN`: three temporal convolution layers followed by statistics pooling
   and separate linear tic-presence and tic-group heads.
 
 All models are initialized with an input feature dimension and number of tic groups:
@@ -303,7 +304,9 @@ model = TDNN(input_dim=40, num_groups=19)
 tic_logits, group_logits = model(features)
 ```
 
-They accept `[batch, features, time]`, `[batch, time, features]`, or `[batch, 1, features, time]`. Each uses mean and standard-deviation statistics pooling and returns:
+They accept `[batch, features, time]`, `[batch, time, features]`, or
+`[batch, 1, features, time]`. Every model uses mean and standard-deviation
+statistics pooling and returns:
 
 - tic-presence logits shaped `[batch, 2]`; and
 - independent tic-group logits shaped `[batch, num_groups]` for multi-label prediction.
@@ -404,10 +407,12 @@ for fold in 1 2 3 4 5; do
 done
 ```
 
-The provided launcher runs its configured detection experiment over all folds:
+The provided launchers run their configured detection experiments over all
+folds and features:
 
 ```bash
-sh launch_all_detection_trainings.sh
+sh launch_detection_trainings_MFCC.sh
+sh launch_detection_trainings_WavLM.sh
 ```
 
 The training loss is the sum of:
@@ -458,8 +463,8 @@ python 06_train_tic_segmentation.py --fold 1 \
     --model-name BiLSTM --split-by session --feat-name MFCC
 ```
 
-After `splits.json` has been created by script 04, run the configured segmentation experiment
-over every fold with:
+After `splits.json` has been created by script 04, run the configured
+segmentation experiment over every fold with:
 
 ```bash
 sh launch_all_segmentation_trainings.sh
@@ -469,10 +474,9 @@ The available models are `BiLSTM`, `CNN`, and `CNN_BiLSTM`. Spectral features
 use the segmentation `SpecDataset`; `--feat-name WavLM` uses `WavLmDataset`
 and the embedding metadata created by script 03. Both use `p_tics=0.2` and
 `BCEWithLogitsLoss`. Each epoch logs frame accuracy, frame F1, frame AUROC,
-segment accuracy, and segment F1.
-The checkpoint with the lowest validation loss is saved as `best.pt`.
-Final validation and test metrics produced during training use a fixed 5%
-segment threshold.
+segment accuracy, and segment F1. The checkpoint with the lowest validation
+loss is saved as `best.pt`. Final validation and test metrics produced during
+training use a fixed 5% segment threshold.
 Models, logs, and validation/test prediction tables are written under:
 
 ```text
@@ -482,7 +486,8 @@ outputs/segmentation/{GLOBAL_NAME}/
 
 Prediction CSV files contain one row per feature frame, including its segment
 ID, frame truth/prediction/probability, and the reduced segment truth and
-prediction.
+prediction. They also store `segment_n_percent=5`, the fixed threshold used by
+the training-time evaluation.
 
 Both training scripts use `bin/training_functions.py` for their common command
 line arguments, feature transforms, saved-fold loading, DataLoader creation,
@@ -546,7 +551,9 @@ rows and reports validation and test frame accuracy, frame F1, frame AUROC,
 segment accuracy, and segment F1. For each fold, it selects the integer segment
 percentage from 0 through 100 that maximizes validation segment F1, prints the
 selected percentage, and applies that same percentage to both validation and
-test metrics. The test outputs are never used to select the threshold.
+test metrics. This analysis-time selection replaces the fixed 5% value stored
+by the training script; the test outputs are never used to select the
+threshold.
 
 ## 11. Confusion matrices
 
@@ -594,7 +601,8 @@ graphs/segmentation/{GLOBAL_NAME}/confusion_matrices.png
 ├── 11_make_graphs.py
 ├── Master Tic Record.xlsx
 ├── README.md
-├── launch_all_detection_trainings.sh
+├── launch_detection_trainings_MFCC.sh
+├── launch_detection_trainings_WavLM.sh
 ├── launch_all_segmentation_trainings.sh
 └── bin/
     ├── __init__.py
@@ -620,6 +628,7 @@ Generated files are not required to live in the repository. With the default con
 /projects/vocaltics/data/wavlm_embeddings/
 splits.json
 models/detection/TDNN_MFCC_bysession/
+models/segmentation/BiLSTM_MFCC_bysession/
 outputs/detection/TDNN_MFCC_bysession/
 outputs/segmentation/BiLSTM_MFCC_bysession/
 graphs/detection/TDNN_MFCC_bysession/confusion_matrices.png
