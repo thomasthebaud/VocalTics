@@ -6,5 +6,6 @@ for model in CNN;do
             --model-name $model \
             --split-by session \
             --feat-name $feat
+        done
     done
 done
