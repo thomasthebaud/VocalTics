@@ -494,6 +494,19 @@ segmentation plots use frame AUROC. Figures are saved to:
 graphs/training_curve/{detection|segmentation}/{GLOBAL_NAME}.png
 ```
 
+## 8. Network parameter counts
+
+Run:
+
+```bash
+python 08_networks_weights.py
+```
+
+The script discovers every detection and segmentation experiment with a
+`fold1/` directory. It loads `best.pt`, or the latest numbered epoch when no
+best checkpoint exists, and prints an aligned table containing each experiment
+name and its number of model parameters.
+
 ## 10. Metrics across folds
 
 ```bash
@@ -560,6 +573,7 @@ graphs/segmentation/{GLOBAL_NAME}/confusion_matrices.png
 ├── 05_train_tic_detection.py
 ├── 06_train_tic_segmentation.py
 ├── 07_training_graphs.py
+├── 08_networks_weights.py
 ├── 10_metrics.py
 ├── 11_make_graphs.py
 ├── Master Tic Record.xlsx
