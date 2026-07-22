@@ -70,7 +70,7 @@ def make_training_graph(task, global_name, log_dir):
         hue="split",
         style="split",
         markers=True,
-        ci=95,
+        errorbar=("ci", 95),
         ax=axes[0],
     )
     axes[0].set_title("Training and validation loss")
@@ -84,7 +84,7 @@ def make_training_graph(task, global_name, log_dir):
         hue="split",
         style="split",
         markers=True,
-        ci=95,
+        errorbar=("ci", 95),
         ax=axes[1],
     )
     axes[1].set_title("Training and validation AUROC")
